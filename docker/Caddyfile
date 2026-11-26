@@ -1,0 +1,16 @@
+# Caddy otomatis mengurus sertifikat HTTPS (Let's Encrypt) untuk {$DOMAIN}.
+# Di jaringan lokal tanpa domain publik: DOMAIN=kasku.lan lalu tambahkan
+# baris "tls internal" di dalam blok di bawah (sertifikat lokal dari Caddy).
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	reverse_proxy app:3000
+}

@@ -1,0 +1,84 @@
+# Kasku — deployment self-hosted.
+# Jalankan: docker compose up -d --build
+# Semua rahasia dibaca dari file .env (lihat .env.example).
+
+name: kasku
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kasku}
+      POSTGRES_USER: ${POSTGRES_USER:-kasku}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Isi POSTGRES_PASSWORD di .env}
+      TZ: Asia/Jakarta
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  app:
+    build: .
+    image: kasku-app:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kasku}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kasku}?schema=public
+      APP_URL: ${APP_URL:?Isi APP_URL di .env}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TZ: Asia/Jakarta
+    networks: [internal, web]
+    # Port tidak dibuka ke host; akses lewat Caddy.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+
+  # Backup harian otomatis (pg_dump) ke ./backups, disimpan BACKUP_KEEP_DAYS hari.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-kasku}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-kasku}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: Asia/Jakarta
+    volumes:
+      - ./backups:/backups
+      - ./docker/backup-loop.sh:/backup-loop.sh:ro
+    entrypoint: ["/bin/sh", "/backup-loop.sh"]
+    networks: [internal]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+  web:

@@ -8,6 +8,7 @@ import { AppError } from "@/server/errors";
 import { TRANSACTION_TYPE_LABELS } from "@/server/ledger";
 import { transactionFormOptions } from "@/server/services/form-options";
 import { getTransaction } from "@/server/services/transactions";
+import { getReceiptForTransaction } from "@/server/receipts/service";
 import { TransactionForm } from "@/components/transactions/transaction-form";
 import { Alert, Badge, Card, CardHeader, PageHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,9 @@ export default async function TransactionDetailPage({
     if (e instanceof AppError && e.code === "not_found") notFound();
     throw e;
   });
-  const { categories, accounts } = await transactionFormOptions(ctx);
+  const [{ categories, accounts }, receipt] = await Promise.all([transactionFormOptions(ctx), getReceiptForTransaction(ctx, t.id)]);
+  const extraction = receipt?.extractions[0];
+  const items = Array.isArray(extraction?.items) ? (extraction.items as { name?: string; qty?: number | null; total?: number | null }[]) : [];
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -108,7 +111,46 @@ export default async function TransactionDetailPage({
             />
           </Card>
 
-          {t.attachments.length > 0 && (
+          {receipt && (
+            <Card>
+              <CardHeader title="Struk" subtitle={extraction ? `Dibaca oleh ${extraction.provider}` : undefined} />
+              <div className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
+                <a href={`/api/receipts/${receipt.id}/image`} target="_blank" rel="noopener" className="shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- gambar privat, tidak lewat optimizer */}
+                  <img src={`/api/receipts/${receipt.id}/image`} alt="Foto struk" className="max-h-72 w-full rounded-lg border border-slate-200 object-contain sm:w-48" />
+                </a>
+                {extraction && (
+                  <dl className="grid flex-1 grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                    {extraction.merchant && (<><dt className="text-slate-500">Toko</dt><dd>{extraction.merchant}</dd></>)}
+                    {extraction.total != null && (<><dt className="text-slate-500">Total</dt><dd><Money value={Number(extraction.total)} /></dd></>)}
+                    {extraction.subtotal != null && (<><dt className="text-slate-500">Subtotal</dt><dd><Money value={Number(extraction.subtotal)} /></dd></>)}
+                    {extraction.discount != null && (<><dt className="text-slate-500">Diskon</dt><dd><Money value={Number(extraction.discount)} /></dd></>)}
+                    {extraction.tax != null && (<><dt className="text-slate-500">Pajak</dt><dd><Money value={Number(extraction.tax)} /></dd></>)}
+                    {extraction.paymentMethod && (<><dt className="text-slate-500">Pembayaran</dt><dd>{extraction.paymentMethod}</dd></>)}
+                    {extraction.confidence != null && (<><dt className="text-slate-500">Keyakinan</dt><dd>{Math.round(Number(extraction.confidence) * 100)}%</dd></>)}
+                    {items.length > 0 && (
+                      <div className="col-span-2 mt-2">
+                        <dt className="mb-1 text-slate-500">Item</dt>
+                        <dd>
+                          <ul className="space-y-0.5">
+                            {items.slice(0, 30).map((it, i) => (
+                              <li key={i} className="flex justify-between gap-2">
+                                <span className="truncate">{it.name}{it.qty && it.qty > 1 ? ` ×${it.qty}` : ""}</span>
+                                {it.total != null && <Money value={Number(it.total)} />}
+                              </li>
+                            ))}
+                          </ul>
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              </div>
+              {t.status === "draft" && <p className="px-5 pb-4 text-xs text-slate-500">Hasil baca otomatis bisa keliru. Cocokkan dengan foto sebelum konfirmasi.</p>}
+            </Card>
+          )}
+
+          {!receipt && t.attachments.length > 0 && (
             <Card>
               <CardHeader title="Lampiran" />
               <p className="px-5 py-4 text-sm text-slate-600">{t.attachments.length} lampiran tersimpan.</p>

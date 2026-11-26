@@ -2,8 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["@node-rs/argon2", "@prisma/client"],
+  serverExternalPackages: ["@node-rs/argon2", "@prisma/client", "tesseract.js", "bullmq"],
   poweredByHeader: false,
+  // Upload foto struk lewat server action (maks. 10 MB + overhead form).
+  experimental: { serverActions: { bodySizeLimit: "11mb" } },
   async headers() {
     return [
       {

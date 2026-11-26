@@ -5,9 +5,9 @@ dan transfer antar-rekening lewat dashboard web atau bot Telegram (termasuk
 foto struk), lalu lihat saldo serta arus kas dalam Rupiah dengan zona waktu
 Asia/Jakarta.
 
-> **Status:** Tahap 1 (fondasi), Tahap 2 (bot Telegram), dan Tahap 3 (foto
-> struk) selesai. Anggaran, hutang/piutang, dan investasi menyusul di Tahap 4.
-> Skema database untuk semuanya sudah disiapkan.
+> **Status:** Tahap 1 (fondasi), Tahap 2 (bot Telegram), Tahap 3 (foto
+> struk), dan Tahap 4 (anggaran, hutang/piutang, investasi, pengingat)
+> selesai.
 
 ## Fitur Tahap 1
 
@@ -41,14 +41,11 @@ Asia/Jakarta.
 - Kategori disarankan dari kata kunci dan dipelajari dari transaksi yang
   pernah kamu simpan.
 - Perintah: `/start`, `/bantuan`, `/saldo`, `/ringkasan`, `/transaksi`,
-  `/anggaran`, `/hutang`, `/piutang`, `/investasi`, `/batal`
-  (anggaran/hutang/piutang/investasi aktif di Tahap 4).
+  `/anggaran`, `/hutang`, `/piutang`, `/investasi`, `/batal`.
 - Hanya akun di `TELEGRAM_ALLOWED_USER_IDS` yang dilayani, hanya di chat
   pribadi. Webhook diverifikasi dengan secret token. Setiap `update_id`
   diproses sekali saja, jadi pesan yang dikirim ulang Telegram tidak membuat
   transaksi ganda.
-- Hutang/piutang dan investasi sudah dikenali parser, tetapi pencatatannya
-  lewat bot aktif di Tahap 4.
 
 ## Fitur Tahap 3: foto struk
 
@@ -69,6 +66,36 @@ Asia/Jakarta.
 - Pembacaan berjalan di service `worker` lewat antrean Redis/BullMQ, jadi
   webhook Telegram tetap cepat. Tanpa `REDIS_URL` (development), struk
   diproses langsung di proses aplikasi.
+
+## Fitur Tahap 4: anggaran, hutang/piutang, investasi, pengingat
+
+- **Anggaran** per kategori (anggaran kategori induk ikut menghitung
+  sub-kategori). Nominal default berlaku tiap bulan, bisa diganti khusus untuk
+  satu bulan. Halaman **Anggaran** menampilkan terpakai, sisa, dan jatah per
+  hari. Bot memberi peringatan saat anggaran lewat 80% dan 100%, sekali per
+  bulan per tingkat.
+- **Hutang & piutang** dengan pihak terkait, jatuh tempo, dan cicilan
+  (jadwal otomatis, cicilan terakhir menyesuaikan sisa pokok). Pembayaran
+  dialokasikan ke cicilan paling lama dulu. Status aktif, lunas, atau
+  terlambat dihitung ulang setiap ada transaksi yang diubah atau dihapus.
+- **Investasi**: saham (lot = 100 lembar), reksa dana, emas, kripto,
+  deposito, obligasi. Beli, jual, dividen, bunga, dan harga manual. Modal
+  dihitung dengan metode harga rata-rata, lengkap dengan untung/rugi
+  terealisasi dan belum terealisasi serta alokasi aset.
+- **Bot**: `pinjam 2jt dari Budi ke BCA cicilan 300rb tiap tanggal 10`,
+  `bayar hutang 400rb ke budi`, `pinjamkan 300rb ke Andi dari Tunai`,
+  `beli BBCA 2 lot @9500 dari BCA`, `jual emas 1 gram 1,6jt ke BCA`,
+  `dividen BBCA 150rb ke BCA`. Semuanya muncul sebagai usulan dengan tombol
+  Simpan, Ubah rekening, dan Batal, dan baru tercatat setelah Simpan.
+- **Pengingat** lewat Telegram: cicilan atau hutang yang jatuh tempo dalam
+  beberapa hari (default 3) atau sudah terlambat, dan anggaran yang lewat
+  batas. Setiap pengingat dikirim sekali saja dan hanya antara 07.00 dan
+  21.00 WIB. Berjalan otomatis di service `worker` setiap
+  `REMINDER_INTERVAL_MINUTES` (default 15). Tanpa worker, jalankan
+  `npm run reminders` dari cron.
+- Dashboard menampilkan anggaran bulan ini, jatuh tempo 14 hari ke depan, dan
+  kekayaan bersih. Laporan menampilkan kekayaan bersih serta anggaran vs
+  realisasi, dengan ekspor CSV untuk investasi dan hutang/piutang.
 
 ## Kebutuhan server
 
@@ -189,6 +216,7 @@ untuk mencoba alur tanpa OCR sungguhan.
 | `RECEIPT_HTTP_URL`, `RECEIPT_HTTP_TOKEN` | untuk `http` | Layanan OCR/AI sendiri, lihat docs/RECEIPT_PROVIDERS.md. |
 | `TESSERACT_LANGS`, `TESSERACT_CACHE_DIR`, `TESSERACT_LANG_PATH` | – | Bahasa OCR (`ind+eng`), cache data bahasa, atau sumber data bahasa offline. |
 | `RECEIPT_WORKER_CONCURRENCY` | – | Jumlah struk yang dibaca bersamaan, default 1. |
+| `REMINDER_INTERVAL_MINUTES` | – | Jarak antar pengecekan pengingat di worker, default 15. |
 
 Nilai rahasia tidak pernah dicetak ke log.
 

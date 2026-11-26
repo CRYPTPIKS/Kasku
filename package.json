@@ -21,7 +21,8 @@
     "telegram:polling": "tsx --env-file-if-exists=.env scripts/telegram-polling.ts",
     "telegram:webhook": "tsx --env-file-if-exists=.env scripts/telegram-webhook.ts",
     "db:demo": "tsx --env-file-if-exists=.env scripts/demo-data.ts",
-    "worker": "tsx --env-file-if-exists=.env src/worker/index.ts"
+    "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
+    "reminders": "tsx --env-file-if-exists=.env scripts/reminders.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

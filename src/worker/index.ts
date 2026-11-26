@@ -1,11 +1,16 @@
 /**
- * Worker antrean struk (BullMQ). Jalankan: npm run worker
+ * Worker latar (BullMQ): membaca struk dan menjalankan pengingat tiap 15 menit.
+ * Jalankan: npm run worker
  * Membutuhkan REDIS_URL, DATABASE_URL, konfigurasi storage, dan (opsional) Telegram.
  */
 import { Api } from "grammy";
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
+import { runReminders } from "../server/notifications/reminders";
+import { telegramSender } from "../server/notifications/telegram-sender";
 import { logger } from "../server/logger";
 import { RECEIPT_QUEUE, redisConnection } from "../server/queue/receipts";
+
+const REMINDER_QUEUE = "reminders";
 import { processReceipt, setReceiptNotifier } from "../server/receipts/service";
 import { getReceiptProvider } from "../server/receipts/providers";
 import { telegramReceiptNotifier } from "../server/telegram/receipt-notifier";
@@ -26,11 +31,28 @@ async function main() {
     { connection, concurrency: Number(process.env.RECEIPT_WORKER_CONCURRENCY ?? 1) },
   );
   worker.on("failed", (job, err) => logger.error("Job struk gagal", { receiptId: job?.data.receiptId, err }));
+
+  // Pengingat berkala. Penjadwal BullMQ memastikan hanya satu job per interval
+  // walau worker dijalankan lebih dari satu.
+  const send = telegramSender();
+  const reminderQueue = new Queue(REMINDER_QUEUE, { connection });
+  const everyMs = Number(process.env.REMINDER_INTERVAL_MINUTES ?? 15) * 60000;
+  await reminderQueue.upsertJobScheduler("reminders", { every: everyMs }, { name: "run", opts: { removeOnComplete: 100, removeOnFail: 100 } });
+  const reminderWorker = new Worker(
+    REMINDER_QUEUE,
+    async () => {
+      const result = await runReminders(send);
+      if (result.created || result.delivery?.sent || result.delivery?.failed) logger.info("Pengingat dijalankan", result);
+      return result;
+    },
+    { connection, concurrency: 1 },
+  );
+  reminderWorker.on("failed", (_job, err) => logger.error("Job pengingat gagal", { err }));
   logger.info("Worker struk berjalan", { provider: provider.name });
 
   const shutdown = async () => {
     logger.info("Menghentikan worker…");
-    await worker.close();
+    await Promise.all([worker.close(), reminderWorker.close(), reminderQueue.close()]);
     await prisma.$disconnect();
     process.exit(0);
   };

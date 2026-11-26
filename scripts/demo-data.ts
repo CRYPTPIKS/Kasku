@@ -1,6 +1,9 @@
 /** Isi data contoh untuk mencoba dashboard (hanya untuk development). */
 import { prisma } from "../src/server/db";
 import { createTransaction } from "../src/server/services/transactions";
+import { setBudget } from "../src/server/services/budgets";
+import { createDebt, recordDebtPayment } from "../src/server/services/debts";
+import { createAsset, recordInvestmentTransaction, setAssetPrice } from "../src/server/services/investments";
 import type { ServiceContext } from "../src/server/context";
 
 async function main() {
@@ -26,5 +29,28 @@ async function main() {
   ] as const;
   for (const r of rows) await createTransaction(ctx, { ...r } as never);
   console.log(`✓ ${rows.length} transaksi contoh dibuat`);
+
+  // Tahap 4: anggaran, hutang/piutang, investasi.
+  await setBudget(ctx, { categoryId: cat["Makan & Minum"]!, amount: "1jt" });
+  await setBudget(ctx, { categoryId: cat["Transportasi"]!, amount: "40rb" });
+  await setBudget(ctx, { categoryId: cat["Belanja Harian"]!, amount: "1,5jt" });
+  const motor = await createDebt(ctx, {
+    direction: "payable",
+    counterparty: "Leasing Motor",
+    principalAmount: "6jt",
+    startDate: d(70),
+    installmentCount: 12,
+    installmentAmount: "550rb",
+    firstDueDate: d(40),
+  });
+  await recordDebtPayment(ctx, motor.id, { amount: "550rb", occurredAt: d(40), accountId: acc["BCA"] });
+  await createDebt(ctx, { direction: "receivable", counterparty: "Andi", principalAmount: "750rb", startDate: d(10), dueDate: d(-5), accountId: acc["Tunai"] });
+  const bbca = await createAsset(ctx, { assetClass: "stock", name: "Bank Central Asia", symbol: "BBCA" });
+  await recordInvestmentTransaction(ctx, bbca.id, { kind: "buy", occurredAt: d(30), units: 300, pricePerUnit: 9200, fee: 4140, accountId: acc["BCA"] });
+  await setAssetPrice(ctx, bbca.id, { price: 9850 });
+  const emas = await createAsset(ctx, { assetClass: "gold", name: "Emas Antam", unitLabel: "gram" });
+  await recordInvestmentTransaction(ctx, emas.id, { kind: "buy", occurredAt: d(60), units: 5, pricePerUnit: 1_420_000 });
+  await setAssetPrice(ctx, emas.id, { price: 1_515_000 });
+  console.log("✓ Anggaran, hutang/piutang, dan investasi contoh dibuat");
 }
 main().finally(() => prisma.$disconnect());

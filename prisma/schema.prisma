@@ -123,6 +123,20 @@ model TelegramIdentity {
 }
 
 // Status percakapan per pengguna Telegram (mis. bot sedang menunggu nominal baru).
+// Aksi bot yang menunggu tombol Simpan (hutang/piutang, investasi). Berlaku 30 menit.
+model TelegramPendingAction {
+  id             String   @id @default(cuid())
+  telegramUserId BigInt
+  householdId    String
+  // debt_create | debt_payment | investment
+  kind           String
+  payload        Json
+  expiresAt      DateTime @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([telegramUserId])
+}
+
 model TelegramChatState {
   telegramUserId BigInt    @id
   // amount | split | receipt_amount

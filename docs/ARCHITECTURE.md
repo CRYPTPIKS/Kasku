@@ -178,7 +178,38 @@ Receipt(status=queued) ──▶ antrean BullMQ "receipts" (atau langsung tanpa 
 - Draf dari struk tetap harus dikonfirmasi pengguna (tombol Simpan atau
   dashboard), sama seperti draf dari teks.
 
+## Anggaran, hutang, investasi, pengingat (Tahap 4)
+
+- **Anggaran:** `Budget` menyimpan nominal default per kategori,
+  `BudgetPeriod` menyimpan nominal khusus bulan tertentu serta
+  `notified80At`/`notified100At`. Peringatan "diklaim" secara atomik
+  (`updateMany ... where notifiedXAt is null`), jadi bot dan worker tidak
+  mengirim dua kali. Realisasi = transaksi `expense` terkonfirmasi di kategori
+  itu dan sub-kategorinya, dalam batas bulan WIB.
+- **Hutang/piutang:** kewajiban = jumlah cicilan bila ada, kalau tidak pokok.
+  Pembayaran adalah transaksi `debt_payment` yang terkonfirmasi dan tidak
+  dihapus, dialokasikan FIFO ke cicilan. `recomputeDebt` (di
+  `debt-balance.ts`) dipanggil setiap transaksi dibuat, diubah, dihapus, atau
+  dipulihkan, sehingga sisa dan status selalu konsisten dengan ledger.
+  Terlambat = lewat dari akhir hari jatuh tempo (WIB).
+- **Investasi:** perhitungan murni di `src/lib/investments.ts` (harga
+  rata-rata). Unit hanya dihitung dari transaksi investasi yang transaksi
+  kasnya terkonfirmasi dan tidak dihapus. Harga pasar = yang terbaru antara
+  harga manual dan harga transaksi terakhir. Transaksi kas yang terkait
+  investasi hanya bisa diubah lewat menu Investasi.
+- **Kekayaan bersih** = saldo rekening positif + nilai pasar investasi +
+  piutang − saldo kartu kredit − hutang.
+- **Usulan bot:** perintah hutang/investasi disimpan sementara di
+  `TelegramPendingAction` (berlaku 30 menit). Tombol memakai
+  `pa:ok|no|acc|seta|back:<id>`. Setelah Simpan atau Batal, baris dihapus,
+  jadi tombol lama hanya menjawab "kedaluwarsa".
+- **Pengingat:** `generateReminders` membuat baris `Notification` dengan
+  kunci unik `(householdId, dedupeKey)`, misalnya `inst:<id>:soon`, lalu
+  `deliverPendingNotifications` mengirim ke Telegram di luar jam tenang
+  (21.00–07.00 WIB). Dijalankan oleh job berulang BullMQ di worker atau oleh
+  `npm run reminders`.
+
 ## Rencana tahap berikutnya
 
-- **Tahap 4:** anggaran, hutang/piutang + cicilan, investasi, pengingat,
-  laporan lanjutan.
+- Ide lanjutan: impor mutasi bank (CSV), transaksi berulang, multi-mata uang,
+  aktivasi 2FA di dashboard.

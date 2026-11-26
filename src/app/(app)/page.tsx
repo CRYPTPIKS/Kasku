@@ -7,6 +7,8 @@ import { BarList } from "@/components/ui/bar-list";
 import { LinkButton } from "@/components/ui/button";
 import { Card, CardHeader, EmptyState } from "@/components/ui/card";
 import { Money } from "@/components/ui/money";
+import { ProgressBar } from "@/components/ui/progress";
+import { formatRupiah } from "@/lib/money";
 
 export default async function DashboardPage() {
   const { user, ctx } = await requireUser();
@@ -123,16 +125,92 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         <Card>
-          <CardHeader title="Anggaran" />
-          <EmptyState icon="🎯" title="Anggaran segera hadir" description="Pantau batas belanja per kategori dengan peringatan 80% dan 100%." />
+          <CardHeader
+            title="Anggaran"
+            subtitle={d.budgets.items.length ? `${formatRupiah(d.budgets.spent)} dari ${formatRupiah(d.budgets.total)}` : undefined}
+            action={
+              <Link href="/anggaran" className="text-sm font-medium text-brand-700">
+                Atur
+              </Link>
+            }
+          />
+          {d.budgets.items.length === 0 ? (
+            <EmptyState icon="🎯" title="Belum ada anggaran" description="Pasang batas belanja per kategori, dapat peringatan di 80% dan 100%." />
+          ) : (
+            <ul className="space-y-3 px-4 py-4 sm:px-5">
+              {d.budgets.items.slice(0, 5).map((b) => (
+                <li key={b.budgetId}>
+                  <div className="mb-1 flex justify-between gap-2 text-sm">
+                    <span className="truncate">
+                      {b.icon && <span aria-hidden>{b.icon} </span>}
+                      {b.name}
+                    </span>
+                    <span className={`tabular shrink-0 ${b.level === "over" ? "text-red-600" : b.level === "warn" ? "text-amber-700" : "text-slate-600"}`}>
+                      {Math.round(b.ratio * 100)}%
+                    </span>
+                  </div>
+                  <ProgressBar ratio={b.ratio} tone={b.level} />
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
         <Card>
-          <CardHeader title="Hutang & piutang" />
-          <EmptyState icon="🤝" title="Belum ada yang jatuh tempo" description="Pengingat jatuh tempo akan tampil di sini." />
+          <CardHeader
+            title="Jatuh tempo"
+            subtitle="14 hari ke depan"
+            action={
+              <Link href="/hutang" className="text-sm font-medium text-brand-700">
+                Semua
+              </Link>
+            }
+          />
+          {d.dues.length === 0 ? (
+            <EmptyState icon="🤝" title="Tidak ada yang jatuh tempo" description="Cicilan hutang/piutang yang mendekati jatuh tempo tampil di sini." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {d.dues.map((x) => (
+                <li key={`${x.debt.id}-${x.sequence}`}>
+                  <Link href={`/hutang/${x.debt.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 sm:px-5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {x.debt.direction === "payable" ? "Bayar ke " : "Tagih "}
+                        {x.debt.counterparty}
+                        {x.sequence ? ` (ke-${x.sequence})` : ""}
+                      </p>
+                      <p className={`text-xs ${x.overdue ? "font-medium text-red-600" : "text-slate-500"}`}>
+                        {x.overdue ? "Terlambat · " : ""}
+                        {formatDate(x.dueDate)}
+                      </p>
+                    </div>
+                    <Money value={x.amount} className="font-semibold" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
         <Card>
-          <CardHeader title="Investasi" />
-          <EmptyState icon="📈" title="Portofolio belum dicatat" description="Ringkasan nilai investasi akan tampil di sini." />
+          <CardHeader
+            title="Kekayaan bersih"
+            action={
+              <Link href="/laporan" className="text-sm font-medium text-brand-700">
+                Rincian
+              </Link>
+            }
+          />
+          <div className="px-4 py-4 sm:px-5">
+            <p className="text-2xl font-bold">
+              <Money value={d.worth.net} />
+            </p>
+            <dl className="mt-3 space-y-1 text-sm">
+              <Row label="Rekening" value={d.worth.cash} href="/rekening" />
+              <Row label="Investasi" value={d.worth.investments} href="/investasi" />
+              <Row label="Piutang" value={d.worth.receivables} href="/hutang?tab=piutang" />
+              <Row label="Kartu kredit" value={-d.worth.creditCards} href="/rekening" />
+              <Row label="Hutang" value={-d.worth.payables} href="/hutang" />
+            </dl>
+          </div>
         </Card>
       </div>
     </div>
@@ -179,5 +257,21 @@ function StatCard({
     </Link>
   ) : (
     body
+  );
+}
+
+function Row({ label, value, href }: { label: string; value: number; href: string }) {
+  if (value === 0) return null;
+  return (
+    <div className="flex justify-between gap-2">
+      <dt>
+        <Link href={href} className="text-slate-600 hover:underline">
+          {label}
+        </Link>
+      </dt>
+      <dd>
+        <Money value={value} />
+      </dd>
+    </div>
   );
 }

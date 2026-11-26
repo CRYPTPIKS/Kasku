@@ -5,6 +5,7 @@ import { AppError, notFound } from "../errors";
 import { canWrite, isAdmin, type ServiceContext } from "../context";
 import { writeAudit } from "../audit";
 import { buildLedgerLines, usesCategory } from "../ledger";
+import { recomputeDebt } from "./debt-balance";
 import {
   transactionFilterSchema,
   transactionInputSchema,
@@ -177,6 +178,7 @@ export async function createTransaction(
       },
     });
     await writeChildren(tx, ctx, created.id, data, lines);
+    if (created.debtId) await recomputeDebt(tx, created.debtId);
     const full = await tx.transaction.findUniqueOrThrow({ where: { id: created.id }, include: transactionInclude });
     await writeAudit(tx, ctx, { entityType: "Transaction", entityId: created.id, action: "create", after: full });
     return full;
@@ -193,10 +195,19 @@ export async function updateTransaction(ctx: ServiceContext, id: string, raw: Tr
       include: transactionInclude,
     });
     if (!before) throw notFound("Transaksi");
+    if (await tx.investmentTransaction.findUnique({ where: { transactionId: id }, select: { id: true } })) {
+      throw new AppError("Transaksi investasi diubah lewat menu Investasi.");
+    }
+    if (before.debtId) {
+      // Tautan ke hutang/piutang tidak bisa diubah dari form transaksi biasa.
+      if (data.type !== before.type) throw new AppError("Jenis transaksi hutang/piutang tidak bisa diubah.");
+      data.debtId = before.debtId;
+    }
     const { debtDirection } = await validateRelations(tx, ctx, data);
     const lines = ledgerFor(data, debtDirection, data.status);
     await tx.transaction.update({ where: { id }, data: { ...scalarData(data), updatedById: ctx.userId } });
     await writeChildren(tx, ctx, id, data, lines);
+    if (before.debtId) await recomputeDebt(tx, before.debtId);
     const after = await tx.transaction.findUniqueOrThrow({ where: { id }, include: transactionInclude });
     await writeAudit(tx, ctx, {
       entityType: "Transaction",
@@ -250,6 +261,7 @@ export async function deleteTransaction(ctx: ServiceContext, id: string) {
       where: { id },
       data: { deletedAt: new Date(), deletedById: ctx.userId, updatedById: ctx.userId },
     });
+    if (after.debtId) await recomputeDebt(tx, after.debtId);
     await writeAudit(tx, ctx, { entityType: "Transaction", entityId: id, action: "delete", before, after });
     return after;
   });
@@ -265,6 +277,7 @@ export async function restoreTransaction(ctx: ServiceContext, id: string) {
       where: { id },
       data: { deletedAt: null, deletedById: null, updatedById: ctx.userId },
     });
+    if (after.debtId) await recomputeDebt(tx, after.debtId);
     await writeAudit(tx, ctx, { entityType: "Transaction", entityId: id, action: "restore", before, after });
     return after;
   });

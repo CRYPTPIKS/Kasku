@@ -4,6 +4,9 @@ import { formatRupiahCompact } from "@/lib/money";
 import { requireUser } from "@/server/auth/current";
 import { resolveReportRange } from "@/server/services/report-range";
 import { monthlyCashFlow, periodTotals, totalsByCategory } from "@/server/services/reports";
+import { listBudgetStatus } from "@/server/services/budgets";
+import { netWorth } from "@/server/services/networth";
+import { ProgressBar } from "@/components/ui/progress";
 import { BarList } from "@/components/ui/bar-list";
 import { Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
 import { Money } from "@/components/ui/money";
@@ -18,12 +21,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const prev = previousMonth(cur.year, cur.month);
   const prevRange = monthRange(prev.year, prev.month);
 
-  const [flow, expenseCats, incomeCats, curTotals, prevTotals] = await Promise.all([
+  const [flow, expenseCats, incomeCats, curTotals, prevTotals, worth, budgets] = await Promise.all([
     monthlyCashFlow(ctx, range.start, range.end),
     totalsByCategory(ctx, "expense", range.start, range.end),
     totalsByCategory(ctx, "income", range.start, range.end),
     periodTotals(ctx, cur.start, cur.end),
     periodTotals(ctx, prevRange.start, prevRange.end),
+    netWorth(ctx),
+    listBudgetStatus(ctx),
   ]);
   const totals = flow.reduce((a, r) => ({ income: a.income + r.income, expense: a.expense + r.expense }), { income: 0, expense: 0 });
   const max = Math.max(1, ...flow.map((r) => Math.max(r.income, r.expense)));
@@ -35,7 +40,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Laporan" description="Arus kas dan rincian per kategori" />
+      <PageHeader title="Laporan" description="Arus kas, kategori, anggaran, dan kekayaan bersih" />
 
       <Card className="p-4">
         <form className="flex flex-wrap items-end gap-3" method="get">
@@ -170,6 +175,71 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           })}
         </div>
       </Card>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Kekayaan bersih"
+            subtitle="Posisi saat ini"
+            action={
+              <span className="flex gap-3 text-sm">
+                <a href="/api/export/investasi" className="font-medium text-brand-700">
+                  CSV investasi
+                </a>
+                <a href="/api/export/hutang" className="font-medium text-brand-700">
+                  CSV hutang
+                </a>
+              </span>
+            }
+          />
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-slate-100">
+              {(
+                [
+                  ["Saldo rekening", worth.cash],
+                  ["Investasi (nilai pasar)", worth.investments],
+                  ["Piutang", worth.receivables],
+                  ["Tagihan kartu kredit", -worth.creditCards],
+                  ["Hutang", -worth.payables],
+                ] as const
+              ).map(([label, v]) => (
+                <tr key={label}>
+                  <td className="px-4 py-2 text-slate-600 sm:px-5">{label}</td>
+                  <td className="px-4 py-2 text-right sm:px-5">
+                    <Money value={v} />
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-slate-50 font-semibold">
+                <td className="px-4 py-2 sm:px-5">Kekayaan bersih</td>
+                <td className="px-4 py-2 text-right sm:px-5">
+                  <Money value={worth.net} />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </Card>
+        <Card>
+          <CardHeader title="Anggaran vs realisasi" subtitle={formatMonth(cur.year, cur.month)} />
+          {budgets.items.length === 0 ? (
+            <EmptyState icon="🎯" title="Belum ada anggaran" description="Atur di menu Anggaran." />
+          ) : (
+            <ul className="space-y-3 px-4 py-4 sm:px-5">
+              {budgets.items.map((b) => (
+                <li key={b.budgetId}>
+                  <div className="mb-1 flex justify-between gap-2 text-sm">
+                    <span className="truncate">{b.name}</span>
+                    <span className="tabular shrink-0 text-slate-600">
+                      <Money value={b.spent} tone="plain" /> / <Money value={b.amount} tone="plain" />
+                    </span>
+                  </div>
+                  <ProgressBar ratio={b.ratio} tone={b.level} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>

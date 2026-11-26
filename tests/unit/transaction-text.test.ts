@@ -146,4 +146,16 @@ describe("variasi", () => {
       counterparty: "Deni",
     });
   });
+
+  it("nama aset investasi tidak ikut nominal/kata depan", () => {
+    expect(parse("beli emas 2 gram 3jt dari BCA").investment).toMatchObject({ assetName: "emas", units: 2, unitLabel: "gram" });
+    expect(parse("jual emas 5 gram 8jt ke BCA").investment?.assetName).toBe("emas");
+    expect(parse("beli BBCA 2 lot @9500 dari BCA")).toMatchObject({ amount: 1_900_000, investment: { assetName: "BBCA", units: 2, pricePerUnit: 9500 } });
+  });
+
+  it("harga dengan 'di' dan kripto berunit", () => {
+    expect(parse("beli 2 lot BBCA di 9500")).toMatchObject({ amount: 1_900_000, investment: { assetName: "BBCA", pricePerUnit: 9500 } });
+    expect(parse("beli 0,01 btc 15jt pakai BCA")).toMatchObject({ amount: 15_000_000, investment: { assetName: "btc", units: 0.01 } });
+    expect(parse("keluar 25rb di 7 eleven").amount).toBe(25_000);
+  });
 });

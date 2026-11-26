@@ -72,6 +72,14 @@ Kirim pesan seperti:
 • <code>transfer 500rb dari BCA ke GoPay</code>
 • <code>kemarin bensin 50rb gopay</code>
 
+Hutang, piutang, investasi:
+• <code>pinjam 2jt dari Budi ke BCA cicilan 500rb tiap tanggal 10</code>
+• <code>pinjamkan 300rb ke Andi dari cash</code>
+• <code>bayar hutang 500rb ke Budi dari BCA</code>
+• <code>beli BBCA 2 lot @9500 dari BCA</code>
+• <code>dividen BBCA 150rb ke BCA</code>
+Atau kirim <b>foto struk</b>.
+
 Nominal bisa ditulis 75rb, 1,5jt, 2 juta, atau Rp 25.000.
 Setiap catatan muncul sebagai <b>draf</b>. Tekan <b>Simpan</b> agar masuk ke saldo.
 

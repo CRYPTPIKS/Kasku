@@ -105,7 +105,7 @@ function hasWord(text: string, word: string) {
 // Deteksi niat
 // ---------------------------------------------------------------------------
 
-const UNIT_WORDS = ["lot", "lembar", "saham", "gram", "gr", "unit", "koin", "coin"];
+const UNIT_WORDS = ["lot", "lembar", "saham", "gram", "gr", "unit", "koin", "coin", "btc", "eth", "sol", "usdt"];
 const ASSET_WORDS = ["emas", "saham", "reksa dana", "reksadana", "rd", "kripto", "crypto", "btc", "eth", "obligasi", "sbn", "ori", "sukuk", "deposito"];
 
 function detectIntent(t: string): { intent: ParsedIntent | null; debtDirection: "payable" | "receivable" | null } {
@@ -260,7 +260,8 @@ export function parseTransactionText(input: string, ctx: ParserContext): ParsedT
 
   if (intent === "investment_buy" || intent === "investment_sell") {
     const unitsM = amounts.find(isUnitCount);
-    const priceM = amounts.find(isPrice);
+    // "2 lot BBCA di 9500" -> 9500 adalah harga per lembar.
+    const priceM = amounts.find((m) => isPrice(m) || (m !== unitsM && /\bdi\s*$/i.test(raw.slice(0, m.start)) && !m.hasUnit));
     const totalM = amounts.find((m) => m !== unitsM && m !== priceM && !isDayNumber(m));
     const unitLabel = unitsM ? (/^\s*(\w+)/.exec(raw.slice(unitsM.end))?.[1]?.toLowerCase() ?? null) : null;
     const units = unitsM?.value ?? null;
@@ -269,8 +270,15 @@ export function parseTransactionText(input: string, ctx: ParserContext): ParsedT
     // Nama aset: kata setelah satuan, atau kata kunci aset.
     let assetName = "";
     if (unitsM) {
-      const after = raw.slice(unitsM.end).replace(/^\s*\w+\s*/, "");
-      assetName = /^([\p{L}\p{N}.-]+(?:\s+[\p{L}\p{N}.-]+)?)/u.exec(after.replace(/\b(di|@|dengan|harga|senilai|seharga)\b.*$/i, "").trim())?.[1] ?? "";
+      const after = raw
+        .slice(unitsM.end)
+        .replace(/^\s*\w+\s*/, "")
+        // Buang mulai dari kata depan/harga, dan token nominal (3jt, 9.500, Rp10rb).
+        .replace(/(^|\s)(di|@|dengan|harga|senilai|seharga|dari|ke|pakai|pake|via|total)(\s.*|$)/i, "")
+        .replace(/@.*$/, "")
+        .replace(/(^|\s)(rp\.?\s*)?\d[\d.,]*\s*(rb|ribu|k|jt|juta|m|miliar)?(?=\s|$)/gi, " ")
+        .trim();
+      assetName = /^([\p{L}\p{N}.-]+(?:\s+[\p{L}\p{N}.-]+)?)/u.exec(after)?.[1] ?? "";
     }
     if (!assetName) {
       const asset = ASSET_WORDS.find((a) => hasWord(t, a));

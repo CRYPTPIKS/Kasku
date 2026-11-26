@@ -5,13 +5,16 @@ import type { ServiceContext } from "../context";
 import { listAccounts, summarizeBalances } from "./accounts";
 import { periodTotals, totalsByCategory } from "./reports";
 import { listTransactions } from "./transactions";
+import { listBudgetStatus } from "./budgets";
+import { upcomingDebtDues } from "./debts";
+import { netWorth } from "./networth";
 
 export async function getDashboard(ctx: ServiceContext, now = new Date()) {
   const month = currentMonthRange(now);
   const prev = previousMonth(month.year, month.month);
   const prevRange = monthRange(prev.year, prev.month);
 
-  const [accounts, totals, prevTotals, byCategory, recent, drafts, receipts] = await Promise.all([
+  const [accounts, totals, prevTotals, byCategory, recent, drafts, receipts, budgets, dues, worth] = await Promise.all([
     listAccounts(ctx),
     periodTotals(ctx, month.start, month.end),
     periodTotals(ctx, prevRange.start, prevRange.end),
@@ -24,6 +27,9 @@ export async function getDashboard(ctx: ServiceContext, now = new Date()) {
       include: { category: { select: { name: true, icon: true } } },
     }),
     receiptStatusCounts(ctx),
+    listBudgetStatus(ctx),
+    upcomingDebtDues(ctx, 14, now),
+    netWorth(ctx),
   ]);
 
   return {
@@ -36,5 +42,8 @@ export async function getDashboard(ctx: ServiceContext, now = new Date()) {
     recent: recent.items,
     drafts,
     receipts,
+    budgets,
+    dues: dues.slice(0, 5),
+    worth,
   };
 }

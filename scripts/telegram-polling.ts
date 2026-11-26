@@ -6,6 +6,7 @@
  * Update tetap lewat processUpdate() sehingga idempotensi & whitelist sama dengan webhook.
  */
 import { getBot, processUpdate } from "../src/server/telegram/bot";
+import { BOT_COMMANDS } from "../src/server/telegram/commands";
 
 async function main() {
   if (process.env.NODE_ENV === "production" && process.env.TELEGRAM_POLLING !== "true") {
@@ -14,6 +15,7 @@ async function main() {
   const { bot, ready } = getBot();
   await ready;
   await bot.api.deleteWebhook();
+  await bot.api.setMyCommands(BOT_COMMANDS);
   console.log(`✓ Polling aktif untuk @${bot.botInfo.username}. Tekan Ctrl+C untuk berhenti.`);
   let offset = 0;
   let running = true;

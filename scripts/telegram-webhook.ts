@@ -5,6 +5,7 @@
  *   npm run telegram:webhook -- delete  # hapus webhook
  */
 import { Api } from "grammy";
+import { BOT_COMMANDS } from "../src/server/telegram/commands";
 import { telegramConfig } from "../src/server/telegram/config";
 
 async function main() {
@@ -21,17 +22,7 @@ async function main() {
       allowed_updates: ["message", "callback_query"],
       max_connections: 10,
     });
-    await api.setMyCommands([
-      { command: "saldo", description: "Saldo semua rekening" },
-      { command: "ringkasan", description: "Ringkasan bulan ini" },
-      { command: "transaksi", description: "10 transaksi terakhir" },
-      { command: "anggaran", description: "Anggaran bulan ini" },
-      { command: "hutang", description: "Daftar hutang" },
-      { command: "piutang", description: "Daftar piutang" },
-      { command: "investasi", description: "Ringkasan investasi" },
-      { command: "batal", description: "Batalkan input yang berjalan" },
-      { command: "bantuan", description: "Cara memakai bot" },
-    ]);
+    await api.setMyCommands(BOT_COMMANDS);
     console.log(`✓ Webhook terpasang: ${url}`);
   } else if (cmd === "delete") {
     await api.deleteWebhook();

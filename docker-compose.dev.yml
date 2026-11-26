@@ -16,24 +16,12 @@ services:
       - pgdata-dev:/var/lib/postgresql/data
       - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
 
-  # Opsional untuk mencoba antrean & MinIO saat development.
+  # Opsional untuk mencoba antrean saat development.
   redis:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
 
-  minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: kasku-dev
-      MINIO_ROOT_PASSWORD: kasku-dev-secret
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
-    volumes:
-      - minio-dev:/data
 
 volumes:
   pgdata-dev:
-  minio-dev:

@@ -9,7 +9,7 @@ Dokumen singkat tentang cara aplikasi disusun dan alasannya.
  Browser ──▶│ Caddy (HTTPS) ──▶ app (Next.js) ──▶ db   │
  Telegram ─▶│                     │       (PostgreSQL) │
             │                     ├──▶ redis ──▶ worker (OCR)
-            │                     └──▶ MinIO (struk)   │
+            │                     └──▶ volume struk    │
             │ backup (pg_dump harian) ──▶ ./backups    │
             └──────────────────────────────────────────┘
 ```
@@ -170,7 +170,7 @@ Receipt(status=queued) ──▶ antrean BullMQ "receipts" (atau langsung tanpa 
   field terstruktur; parser `src/lib/parsing/receipt-text.ts` mengubah teks
   OCR menjadi toko, tanggal, total, subtotal, diskon, pajak, biaya layanan,
   metode bayar, dan item.
-- `src/server/storage/`: driver `s3` (MinIO), `local`, `memory` (test).
+- `src/server/storage/`: driver `local` (default, volume Docker `receipts`), `s3` (S3-compatible milik sendiri), `memory` (test).
   Foto tidak pernah diberi URL publik; dashboard membukanya lewat
   `/api/receipts/:id/image` yang mengecek sesi dan household.
 - Status struk: `queued → processing → extracted | failed`. Struk yang sudah

@@ -61,8 +61,8 @@ Asia/Jakarta.
   bahasa ikut terpasang, tidak diunduh saat runtime). Bisa diganti
   penyedia lain lewat `RECEIPT_PROVIDER`, lihat
   [docs/RECEIPT_PROVIDERS.md](docs/RECEIPT_PROVIDERS.md).
-- Foto disimpan di MinIO (bucket privat, tanpa port publik) dan hanya bisa
-  dibuka lewat aplikasi setelah login (`Cache-Control: private, no-store`).
+- Foto disimpan di volume Docker privat `receipts` (tanpa URL publik) dan
+  hanya bisa dibuka lewat aplikasi setelah login (`Cache-Control: private, no-store`).
 - Pembacaan berjalan di service `worker` lewat antrean Redis/BullMQ, jadi
   webhook Telegram tetap cepat. Tanpa `REDIS_URL` (development), struk
   diproses langsung di proses aplikasi.
@@ -138,9 +138,9 @@ Layanan di `docker-compose.yml`:
 |---|---|
 | `db` | PostgreSQL 16, data di volume `pgdata` |
 | `app` | Next.js (port 3000, hanya di jaringan internal) |
-| `worker` | Pembaca struk (OCR) dari antrean, image sama dengan `app` |
+| `worker` | Pembaca struk (OCR) dan pengingat dari antrean, image sama dengan `app` |
+| `bot` | Bot Telegram mode polling (hanya dengan `--profile polling`) |
 | `redis` | Antrean BullMQ (dengan password, hanya jaringan internal) |
-| `minio` | Penyimpanan foto struk, bucket privat, tanpa port/konsol publik |
 | `caddy` | Reverse proxy + HTTPS otomatis (Let's Encrypt) |
 | `backup` | `pg_dump` harian pukul 02.00 WIB ke `./backups`, disimpan 14 hari |
 
@@ -211,7 +211,7 @@ Set `COOKIE_SECURE=false` di `.env` saat development lewat `http://`.
 
 Foto struk saat development: tanpa pengaturan apa pun, foto disimpan di
 `./storage` dan dibaca langsung oleh proses `npm run dev`. Untuk mencoba
-antrean seperti production, nyalakan Redis (dan MinIO bila mau) dari
+antrean seperti production, nyalakan Redis dari
 `docker-compose.dev.yml`, isi `REDIS_URL=redis://localhost:6379`, lalu
 jalankan `npm run worker` di terminal lain. `RECEIPT_PROVIDER=mock` berguna
 untuk mencoba alur tanpa OCR sungguhan.
@@ -237,9 +237,8 @@ untuk mencoba alur tanpa OCR sungguhan.
 
 | `REDIS_PASSWORD` | ya (Docker) | Password Redis. Gunakan hex acak (tanpa simbol, karena masuk ke URL). |
 | `REDIS_URL` | – | Non-Docker: `redis://:pass@host:6379/0`. Kosong = struk diproses langsung tanpa antrean. |
-| `STORAGE_DRIVER` | – | `s3` (Docker), `local` (default non-Docker, folder `LOCAL_STORAGE_DIR` = `./storage`). |
-| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | ya (Docker) | Kredensial MinIO (secret minimal 8 karakter). |
-| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_FORCE_PATH_STYLE` | – | Default `kasku-receipts`, MinIO internal. Bucket dibuat otomatis, privat. |
+| `STORAGE_DRIVER` | – | `local` (default; Docker memakai volume `receipts`, non-Docker folder `./storage`) atau `s3`. |
+| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, `S3_FORCE_PATH_STYLE` | untuk `s3` | Penyimpanan S3-compatible milikmu sendiri (Garage, SeaweedFS, dll.). Bucket dibuat otomatis, privat. |
 | `HTTP_PORT`, `HTTPS_PORT` | – | Port host untuk Caddy, default 80 dan 443. |
 | `RECEIPT_PROVIDER` | – | `tesseract` (default), `http`, atau `mock`. |
 | `RECEIPT_HTTP_URL`, `RECEIPT_HTTP_TOKEN` | untuk `http` | Layanan OCR/AI sendiri, lihat docs/RECEIPT_PROVIDERS.md. |
@@ -314,10 +313,10 @@ menghapus file lebih tua dari `BACKUP_KEEP_DAYS` hari. Salin folder
 ./scripts/backup.sh
 ```
 
-Foto struk ada di volume `miniodata`. Backup juga volume ini, misalnya:
+Foto struk ada di volume `receipts`. Backup juga volume ini, misalnya:
 
 ```bash
-docker run --rm -v kasku_miniodata:/data -v "$PWD/backups":/out alpine \
+docker run --rm -v kasku_receipts:/data -v "$PWD/backups":/out alpine \
   tar czf /out/struk-$(date +%Y%m%d).tar.gz -C /data .
 ```
 

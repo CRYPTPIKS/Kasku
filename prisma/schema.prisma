@@ -1,0 +1,687 @@
+// Schema database Kasku.
+// Semua data keuangan di-scope ke Household ("ruang keuangan") agar nanti
+// bisa dipakai keluarga/banyak pengguna. Versi awal: satu household, satu pemilik.
+//
+// Konvensi nominal:
+// - Uang: Decimal(18,2), selalu positif di Transaction.amount.
+// - Arah uang masuk/keluar rekening dicatat di LedgerEntry (signed).
+// - Unit & harga investasi: Decimal(24,8).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Pengguna & akses
+// ---------------------------------------------------------------------------
+
+enum HouseholdRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+model Household {
+  id        String   @id @default(cuid())
+  name      String
+  currency  String   @default("IDR")
+  timezone  String   @default("Asia/Jakarta")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  members               HouseholdMember[]
+  accounts              Account[]
+  accountTypes          AccountType[]
+  categories            Category[]
+  transactions          Transaction[]
+  tags                  Tag[]
+  budgets               Budget[]
+  debts                 Debt[]
+  investmentAssets      InvestmentAsset[]
+  receipts              Receipt[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+  categoryMerchantRules CategoryMerchantRule[]
+}
+
+model User {
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  name                   String
+  passwordHash           String
+  isActive               Boolean   @default(true)
+  // Disiapkan untuk autentikasi dua langkah (TOTP) di masa depan.
+  twoFactorEnabled       Boolean   @default(false)
+  twoFactorSecret        String? // terenkripsi saat fitur aktif
+  twoFactorRecoveryCodes String[]  @default([])
+  lastLoginAt            DateTime? @db.Timestamptz(3)
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime  @updatedAt @db.Timestamptz(3)
+
+  memberships         HouseholdMember[]
+  sessions            Session[]
+  telegramIdentities  TelegramIdentity[]
+  createdTransactions Transaction[]      @relation("TransactionCreatedBy")
+  updatedTransactions Transaction[]      @relation("TransactionUpdatedBy")
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+}
+
+model HouseholdMember {
+  id          String        @id @default(cuid())
+  householdId String
+  userId      String
+  role        HouseholdRole @default(member)
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, userId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  // SHA-256 dari token cookie; token asli tidak pernah disimpan.
+  tokenHash  String   @unique
+  expiresAt  DateTime @db.Timestamptz(3)
+  // true jika sudah lolos langkah kedua (2FA). Saat 2FA belum aktif selalu true.
+  verified   Boolean  @default(true)
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model TelegramIdentity {
+  id               String   @id @default(cuid())
+  userId           String
+  telegramUserId   BigInt   @unique
+  username         String?
+  firstName        String?
+  // Chat pribadi tempat bot membalas & mengirim pengingat.
+  chatId           BigInt?
+  // Rekening default untuk input cepat.
+  defaultAccountId String?
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProcessedTelegramUpdate {
+  // update_id dari Telegram; primary key menjamin idempotensi.
+  updateId       BigInt   @id
+  telegramUserId BigInt?
+  kind           String
+  status         String   @default("processed") // processed | failed | ignored
+  error          String?
+  processedAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([processedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Rekening & kategori
+// ---------------------------------------------------------------------------
+
+enum AccountKind {
+  cash
+  bank
+  ewallet
+  credit_card
+  deposit
+  other
+}
+
+// Jenis rekening yang bisa diatur pengguna (mis. "Bank", "E-wallet").
+// kind menentukan perilaku: credit_card = kewajiban.
+model AccountType {
+  id          String      @id @default(cuid())
+  householdId String
+  kind        AccountKind
+  name        String
+  isLiability Boolean     @default(false)
+  sortOrder   Int         @default(0)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  accounts  Account[]
+
+  @@unique([householdId, kind])
+}
+
+model Account {
+  id                 String   @id @default(cuid())
+  householdId        String
+  accountTypeId      String
+  name               String
+  // Nama pendek / alias untuk dikenali parser Telegram (mis. "bca", "gopay").
+  aliases            String[] @default([])
+  institution        String?
+  accountNumberLast4 String?
+  initialBalance     Decimal  @default(0) @db.Decimal(18, 2)
+  // Untuk kartu kredit: limit kredit.
+  creditLimit        Decimal? @db.Decimal(18, 2)
+  color              String?
+  isArchived         Boolean  @default(false)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+
+  household   Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  accountType AccountType   @relation(fields: [accountTypeId], references: [id])
+  outgoing    Transaction[] @relation("TransactionFromAccount")
+  incoming    Transaction[] @relation("TransactionToAccount")
+  entries     LedgerEntry[]
+
+  @@unique([householdId, name])
+  @@index([householdId, isArchived])
+}
+
+enum CategoryKind {
+  income
+  expense
+}
+
+model Category {
+  id          String       @id @default(cuid())
+  householdId String
+  parentId    String?
+  kind        CategoryKind
+  name        String
+  icon        String?
+  color       String?
+  // Kata kunci untuk saran kategori otomatis (parser teks & struk).
+  keywords    String[]     @default([])
+  isArchived  Boolean      @default(false)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+
+  household     Household              @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  parent        Category?              @relation("CategoryTree", fields: [parentId], references: [id])
+  children      Category[]             @relation("CategoryTree")
+  transactions  Transaction[]
+  splits        TransactionSplit[]
+  budgets       Budget[]
+  merchantRules CategoryMerchantRule[]
+
+  @@unique([householdId, kind, name])
+  @@index([householdId, kind])
+}
+
+// Kebiasaan pengguna: merchant tertentu -> kategori (dipelajari dari konfirmasi).
+model CategoryMerchantRule {
+  id          String   @id @default(cuid())
+  householdId String
+  merchantKey String // nama merchant ternormalisasi (huruf kecil, tanpa simbol)
+  categoryId  String
+  hits        Int      @default(1)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, merchantKey])
+}
+
+// ---------------------------------------------------------------------------
+// Transaksi
+// ---------------------------------------------------------------------------
+
+enum TransactionType {
+  income
+  expense
+  transfer
+  debt_receivable
+  debt_payable
+  debt_payment
+  investment_buy
+  investment_sell
+  investment_income
+  adjustment
+}
+
+enum TransactionStatus {
+  draft
+  confirmed
+}
+
+enum TransactionSource {
+  web
+  telegram_text
+  telegram_receipt
+  import
+  system
+}
+
+model Transaction {
+  id                String            @id @default(cuid())
+  householdId       String
+  type              TransactionType
+  status            TransactionStatus @default(confirmed)
+  source            TransactionSource @default(web)
+  occurredAt        DateTime          @db.Timestamptz(3)
+  // Selalu positif. Arah dana ditentukan oleh type + rekening asal/tujuan.
+  amount            Decimal           @db.Decimal(18, 2)
+  description       String?
+  merchant          String?
+  note              String?
+  categoryId        String?
+  fromAccountId     String?
+  toAccountId       String?
+  debtId            String?
+  // Untuk debt_payment: satu cicilan tertentu (opsional).
+  debtInstallmentId String?
+  createdById       String?
+  updatedById       String?
+  deletedAt         DateTime?         @db.Timestamptz(3)
+  deletedById       String?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+
+  household       Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category        Category?        @relation(fields: [categoryId], references: [id])
+  fromAccount     Account?         @relation("TransactionFromAccount", fields: [fromAccountId], references: [id])
+  toAccount       Account?         @relation("TransactionToAccount", fields: [toAccountId], references: [id])
+  debt            Debt?            @relation(fields: [debtId], references: [id])
+  debtInstallment DebtInstallment? @relation(fields: [debtInstallmentId], references: [id])
+  createdBy       User?            @relation("TransactionCreatedBy", fields: [createdById], references: [id])
+  updatedBy       User?            @relation("TransactionUpdatedBy", fields: [updatedById], references: [id])
+
+  entries               LedgerEntry[]
+  splits                TransactionSplit[]
+  tags                  TransactionTag[]
+  attachments           TransactionAttachment[]
+  investmentTransaction InvestmentTransaction?
+  receipt               Receipt?
+
+  @@index([householdId, occurredAt])
+  @@index([householdId, status])
+  @@index([householdId, deletedAt])
+  @@index([categoryId])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+}
+
+// Baris buku besar (double-entry sederhana). Setiap transaksi menghasilkan
+// satu atau dua entri bertanda +/-. Transfer = -asal & +tujuan, total nol,
+// sehingga transfer tidak pernah dihitung sebagai pemasukan/pengeluaran.
+model LedgerEntry {
+  id            String  @id @default(cuid())
+  transactionId String
+  accountId     String
+  amount        Decimal @db.Decimal(18, 2) // + masuk ke rekening, - keluar dari rekening
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account     Account     @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([transactionId])
+}
+
+// Pembagian satu transaksi ke beberapa kategori (mis. belanja bulanan).
+model TransactionSplit {
+  id            String  @id @default(cuid())
+  transactionId String
+  categoryId    String?
+  amount        Decimal @db.Decimal(18, 2)
+  note          String?
+  sortOrder     Int     @default(0)
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  category    Category?   @relation(fields: [categoryId], references: [id])
+
+  @@index([transactionId])
+  @@index([categoryId])
+}
+
+model TransactionAttachment {
+  id            String   @id @default(cuid())
+  transactionId String
+  storageKey    String // kunci objek privat di S3/MinIO
+  fileName      String?
+  mimeType      String
+  sizeBytes     Int
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  householdId String
+  name        String
+  color       String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  household    Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transactions TransactionTag[]
+
+  @@unique([householdId, name])
+}
+
+model TransactionTag {
+  transactionId String
+  tagId         String
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+}
+
+// ---------------------------------------------------------------------------
+// Struk
+// ---------------------------------------------------------------------------
+
+enum ReceiptStatus {
+  uploaded
+  queued
+  processing
+  extracted
+  failed
+  confirmed
+}
+
+model Receipt {
+  id                String        @id @default(cuid())
+  householdId       String
+  transactionId     String?       @unique
+  status            ReceiptStatus @default(uploaded)
+  storageKey        String // objek privat; akses hanya lewat URL bertanda tangan berumur pendek
+  mimeType          String
+  sizeBytes         Int
+  sha256            String // deteksi struk duplikat
+  telegramFileId    String?
+  telegramChatId    BigInt?
+  telegramMessageId Int?
+  errorMessage      String?
+  attempts          Int           @default(0)
+  createdAt         DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
+
+  household   Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transaction Transaction?        @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  extractions ReceiptExtraction[]
+
+  @@index([householdId, status])
+  @@index([householdId, sha256])
+}
+
+model ReceiptExtraction {
+  id            String    @id @default(cuid())
+  receiptId     String
+  provider      String // nama ReceiptExtractionProvider
+  merchant      String?
+  occurredAt    DateTime? @db.Timestamptz(3)
+  total         Decimal?  @db.Decimal(18, 2)
+  subtotal      Decimal?  @db.Decimal(18, 2)
+  tax           Decimal?  @db.Decimal(18, 2)
+  discount      Decimal?  @db.Decimal(18, 2)
+  serviceCharge Decimal?  @db.Decimal(18, 2)
+  paymentMethod String?
+  items         Json? // [{ name, qty, unitPrice, total }]
+  confidence    Float?
+  rawText       String?
+  rawResponse   Json?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+}
+
+// ---------------------------------------------------------------------------
+// Anggaran
+// ---------------------------------------------------------------------------
+
+model Budget {
+  id          String   @id @default(cuid())
+  householdId String
+  categoryId  String
+  // Nominal default untuk periode baru.
+  amount      Decimal  @db.Decimal(18, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  household Household      @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category  Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  periods   BudgetPeriod[]
+
+  @@unique([householdId, categoryId])
+}
+
+model BudgetPeriod {
+  id            String    @id @default(cuid())
+  budgetId      String
+  // Bulan dalam format YYYY-MM (zona Asia/Jakarta).
+  month         String
+  amount        Decimal   @db.Decimal(18, 2)
+  // Penanda notifikasi agar peringatan 80%/100% tidak dikirim berulang.
+  notified80At  DateTime? @db.Timestamptz(3)
+  notified100At DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, month])
+}
+
+// ---------------------------------------------------------------------------
+// Hutang & piutang
+// ---------------------------------------------------------------------------
+
+enum DebtDirection {
+  payable // hutang: saya berhutang ke pihak lain
+  receivable // piutang: pihak lain berhutang ke saya
+}
+
+enum DebtStatus {
+  active
+  paid
+  overdue
+}
+
+model Debt {
+  id                 String        @id @default(cuid())
+  householdId        String
+  direction          DebtDirection
+  counterparty       String
+  principalAmount    Decimal       @db.Decimal(18, 2)
+  // Disimpan agar cepat ditampilkan; dihitung ulang dari pembayaran.
+  remainingAmount    Decimal       @db.Decimal(18, 2)
+  startDate          DateTime      @db.Timestamptz(3)
+  dueDate            DateTime?     @db.Timestamptz(3)
+  note               String?
+  status             DebtStatus    @default(active)
+  reminderDaysBefore Int           @default(3)
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
+
+  household    Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  installments DebtInstallment[]
+  transactions Transaction[]
+
+  @@index([householdId, status])
+}
+
+model DebtInstallment {
+  id         String    @id @default(cuid())
+  debtId     String
+  sequence   Int
+  dueDate    DateTime  @db.Timestamptz(3)
+  amount     Decimal   @db.Decimal(18, 2)
+  paidAmount Decimal   @default(0) @db.Decimal(18, 2)
+  paidAt     DateTime? @db.Timestamptz(3)
+  remindedAt DateTime? @db.Timestamptz(3)
+
+  debt         Debt          @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@unique([debtId, sequence])
+  @@index([dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Investasi
+// ---------------------------------------------------------------------------
+
+enum InvestmentAssetClass {
+  stock
+  mutual_fund
+  gold
+  crypto
+  deposit
+  bond
+  other
+}
+
+model InvestmentAsset {
+  id          String               @id @default(cuid())
+  householdId String
+  assetClass  InvestmentAssetClass
+  // Kode/simbol (mis. BBCA, BTC). Dipakai untuk integrasi harga otomatis.
+  symbol      String?
+  name        String
+  // Satuan tampilan: lembar, lot, gram, unit, koin.
+  unitLabel   String               @default("unit")
+  // Untuk saham IDX: 1 lot = 100 lembar.
+  unitsPerLot Int?
+  // Sumber harga: manual | <nama provider> (untuk integrasi otomatis nanti).
+  priceSource String               @default("manual")
+  isArchived  Boolean              @default(false)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
+
+  household    Household               @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transactions InvestmentTransaction[]
+  prices       InvestmentPrice[]
+
+  @@unique([householdId, assetClass, name])
+}
+
+enum InvestmentTransactionKind {
+  buy
+  sell
+  dividend
+  interest
+  fee
+}
+
+model InvestmentTransaction {
+  id            String                    @id @default(cuid())
+  assetId       String
+  // Transaksi kas terkait (investment_buy/sell/income) agar saldo rekening ikut.
+  transactionId String?                   @unique
+  kind          InvestmentTransactionKind
+  occurredAt    DateTime                  @db.Timestamptz(3)
+  units         Decimal                   @default(0) @db.Decimal(24, 8)
+  pricePerUnit  Decimal                   @default(0) @db.Decimal(24, 8)
+  fee           Decimal                   @default(0) @db.Decimal(18, 2)
+  // Total kas: units*price (+fee untuk beli / -fee untuk jual) atau nilai dividen.
+  totalAmount   Decimal                   @db.Decimal(18, 2)
+  note          String?
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(3)
+
+  asset       InvestmentAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  transaction Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([assetId, occurredAt])
+}
+
+model InvestmentPrice {
+  id        String   @id @default(cuid())
+  assetId   String
+  price     Decimal  @db.Decimal(24, 8)
+  asOf      DateTime @db.Timestamptz(3)
+  source    String   @default("manual")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  asset InvestmentAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, asOf])
+}
+
+// ---------------------------------------------------------------------------
+// Notifikasi & audit
+// ---------------------------------------------------------------------------
+
+enum NotificationChannel {
+  telegram
+  web
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+  read
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  householdId String
+  userId      String?
+  channel     NotificationChannel
+  kind        String // budget_80 | budget_100 | debt_due | receipt_ready | ...
+  title       String
+  body        String
+  // Kunci unik agar notifikasi yang sama tidak terkirim dua kali.
+  dedupeKey   String?
+  status      NotificationStatus  @default(pending)
+  scheduledAt DateTime            @default(now()) @db.Timestamptz(3)
+  sentAt      DateTime?           @db.Timestamptz(3)
+  readAt      DateTime?           @db.Timestamptz(3)
+  error       String?
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([householdId, dedupeKey])
+  @@index([status, scheduledAt])
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  restore
+  confirm
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  householdId String
+  actorUserId String?
+  // web | telegram | system
+  actorSource String      @default("web")
+  entityType  String
+  entityId    String
+  action      AuditAction
+  before      Json?
+  after       Json?
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([householdId, entityType, entityId])
+  @@index([householdId, createdAt])
+}

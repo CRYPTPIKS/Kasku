@@ -122,6 +122,16 @@ model TelegramIdentity {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// Status percakapan per pengguna Telegram (mis. bot sedang menunggu nominal baru).
+model TelegramChatState {
+  telegramUserId BigInt    @id
+  // amount | split | description
+  awaiting       String?
+  transactionId  String?
+  expiresAt      DateTime? @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+}
+
 model ProcessedTelegramUpdate {
   // update_id dari Telegram; primary key menjamin idempotensi.
   updateId       BigInt   @id

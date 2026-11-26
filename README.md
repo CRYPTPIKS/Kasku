@@ -5,9 +5,9 @@ dan transfer antar-rekening lewat dashboard web (dan segera lewat bot
 Telegram), lalu lihat saldo serta arus kas dalam Rupiah dengan zona waktu
 Asia/Jakarta.
 
-> **Status:** Tahap 1 (fondasi) selesai. Bot Telegram, foto struk, anggaran,
-> hutang/piutang, dan investasi menyusul di Tahap 2–4. Skema database untuk
-> semuanya sudah disiapkan.
+> **Status:** Tahap 1 (fondasi) dan Tahap 2 (bot Telegram) selesai. Foto
+> struk, anggaran, hutang/piutang, dan investasi menyusul di Tahap 3–4.
+> Skema database untuk semuanya sudah disiapkan.
 
 ## Fitur Tahap 1
 
@@ -27,6 +27,28 @@ Asia/Jakarta.
 - Laporan: arus kas bulanan, per kategori, bulan ini vs bulan lalu; filter
   rentang tanggal; ekspor CSV.
 - Tampilan responsif, nyaman di ponsel (navigasi bawah).
+
+## Fitur Tahap 2: bot Telegram
+
+- Catat lewat chat dengan bahasa sehari-hari, misalnya
+  `keluar 75rb makan siang pakai cash`, `bayar listrik 425000 dari BCA`,
+  `masuk 12jt gaji bulan November`, `transfer 500rb dari BCA ke GoPay`.
+- Setiap pesan menjadi **draf** dengan tombol: Simpan, Ubah nominal, Ubah
+  kategori, Ubah rekening, Bagi transaksi, Hapus. Saldo baru berubah setelah
+  Simpan.
+- Kalau ada yang kurang (rekening/kategori), bot menanyakan satu hal dengan
+  tombol pilihan, tidak menebak.
+- Kategori disarankan dari kata kunci dan dipelajari dari transaksi yang
+  pernah kamu simpan.
+- Perintah: `/start`, `/bantuan`, `/saldo`, `/ringkasan`, `/transaksi`,
+  `/anggaran`, `/hutang`, `/piutang`, `/investasi`, `/batal`
+  (anggaran/hutang/piutang/investasi aktif di Tahap 4).
+- Hanya akun di `TELEGRAM_ALLOWED_USER_IDS` yang dilayani, hanya di chat
+  pribadi. Webhook diverifikasi dengan secret token. Setiap `update_id`
+  diproses sekali saja, jadi pesan yang dikirim ulang Telegram tidak membuat
+  transaksi ganda.
+- Hutang/piutang dan investasi sudah dikenali parser, tetapi pencatatannya
+  lewat bot aktif di Tahap 4.
 
 ## Kebutuhan server
 
@@ -56,7 +78,7 @@ Saat container `app` mulai, migrasi database dijalankan otomatis
 docker compose exec app npx prisma db seed
 
 # Akun pemilik (kata sandi diminta tanpa ditampilkan)
-docker compose exec -it app npx tsx scripts/create-user.ts --email kamu@contoh.com --name "Nama Kamu"
+docker compose exec -it app npm run user:create -- --email kamu@contoh.com --name "Nama Kamu"
 ```
 
 Buka `https://DOMAIN-kamu` dan masuk.
@@ -75,7 +97,7 @@ Perintah berguna:
 ```bash
 docker compose logs -f app                 # log aplikasi
 docker compose pull && docker compose up -d --build   # update setelah git pull
-docker compose exec -it app npx tsx scripts/create-user.ts --email kamu@contoh.com --reset   # reset kata sandi
+docker compose exec -it app npm run user:create -- --email kamu@contoh.com --reset   # reset kata sandi
 ```
 
 ### HTTPS di jaringan lokal
@@ -101,7 +123,7 @@ docker compose -f docker-compose.dev.yml up -d
 
 npx prisma migrate dev                  # buat tabel
 SEED_ADMIN_EMAIL=saya@contoh.com SEED_ADMIN_PASSWORD='kata-sandi-minimal-10' npm run db:seed
-npx tsx scripts/demo-data.ts            # opsional: transaksi contoh
+npm run db:demo                         # opsional: transaksi contoh
 npm run dev                             # http://localhost:3000
 ```
 
@@ -123,9 +145,12 @@ Set `COOKIE_SECURE=false` di `.env` saat development lewat `http://`.
 | `BACKUP_KEEP_DAYS` | – | Lama penyimpanan backup otomatis, default 14. |
 | `TEST_DATABASE_URL` | – | Database test integrasi (nama harus berakhiran `_test`). |
 
-Variabel Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
-`TELEGRAM_ALLOWED_USER_IDS`) dan object storage ditambahkan di Tahap 2–3.
-Nilai rahasia tidak pernah dicetak ke log.
+| `TELEGRAM_BOT_TOKEN` | untuk bot | Token dari @BotFather. |
+| `TELEGRAM_WEBHOOK_SECRET` | untuk webhook | Rahasia 16–256 karakter (`A-Z a-z 0-9 _ -`). |
+| `TELEGRAM_ALLOWED_USER_IDS` | untuk bot | ID numerik akun Telegram yang diizinkan, pisahkan koma. |
+
+Variabel object storage ditambahkan di Tahap 3. Nilai rahasia tidak pernah
+dicetak ke log.
 
 ## Migrasi database
 
@@ -135,11 +160,49 @@ npx prisma migrate deploy               # production: terapkan migrasi (otomatis
 npx prisma studio                       # lihat data
 ```
 
-## Menjalankan webhook Telegram
+## Menyiapkan bot Telegram
 
-Hadir di Tahap 2. Rencananya: production memakai webhook
-`https://DOMAIN/api/telegram/webhook` dengan secret token, development
-memakai long polling.
+1. Buka [@BotFather](https://t.me/BotFather), kirim `/newbot`, simpan token-nya.
+2. Cari ID numerik akun Telegram-mu, misalnya lewat [@userinfobot](https://t.me/userinfobot).
+3. Isi di `.env`:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456:ABC...
+   TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 32)   # tempel hasilnya
+   TELEGRAM_ALLOWED_USER_IDS=123456789               # boleh lebih dari satu, pisahkan koma
+   ```
+
+4. Pastikan akun dashboard pemilik sudah dibuat. Akun Telegram yang diizinkan
+   otomatis ditautkan ke pemilik saat pertama kali mengirim pesan.
+
+### Production: webhook
+
+Webhook butuh `APP_URL` HTTPS yang bisa diakses Telegram dari internet.
+
+```bash
+docker compose up -d                       # muat ulang env baru
+docker compose exec app npm run telegram:webhook -- set     # daftarkan webhook + daftar perintah
+docker compose exec app npm run telegram:webhook -- info    # cek status / error terakhir
+```
+
+Telegram akan memanggil `https://DOMAIN/api/telegram/webhook` dengan header
+`X-Telegram-Bot-Api-Secret-Token`. Permintaan dengan secret salah ditolak
+(401).
+
+Jika server hanya bisa diakses di LAN, Telegram tidak bisa mengirim webhook.
+Pilihannya: buka hanya path webhook lewat Cloudflare Tunnel / Tailscale
+Funnel, atau jalankan mode polling di server (lihat di bawah).
+
+### Development: polling
+
+```bash
+npm run telegram:polling
+```
+
+Perintah ini menghapus webhook yang aktif lalu mengambil pesan dengan
+`getUpdates`. Jalur prosesnya sama dengan webhook (whitelist + anti-duplikat).
+Jangan jalankan polling dan webhook bersamaan; setelah selesai, pasang lagi
+webhook dengan `telegram:webhook -- set`.
 
 ## Backup & restore
 
@@ -177,8 +240,8 @@ docker compose start app
 
 ```bash
 npm test                 # semua test (unit + integrasi)
-npm run test:unit        # parser nominal & aturan double-entry, tanpa database
-npm run test:integration # layanan & endpoint API, butuh TEST_DATABASE_URL
+npm run test:unit        # parser nominal, parser teks transaksi, aturan double-entry
+npm run test:integration # layanan, endpoint API, bot & webhook Telegram (API Telegram disadap, tanpa jaringan)
 npm run lint
 npm run typecheck
 ```

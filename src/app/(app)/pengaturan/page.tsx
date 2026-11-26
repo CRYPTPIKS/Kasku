@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { formatDateTime } from "@/lib/dates";
 import { requireUser } from "@/server/auth/current";
 import { prisma } from "@/server/db";
+import { isTelegramConfigured } from "@/server/telegram/config";
 import { PasswordForm } from "@/components/settings/password-form";
 import { Badge, Card, CardHeader, PageHeader } from "@/components/ui/card";
 
@@ -9,9 +10,11 @@ export const metadata: Metadata = { title: "Pengaturan" };
 
 export default async function SettingsPage() {
   const { user, ctx } = await requireUser();
-  const [household, sessions] = await Promise.all([
+  const telegramReady = isTelegramConfigured();
+  const [household, sessions, telegramIds] = await Promise.all([
     prisma.household.findUniqueOrThrow({ where: { id: ctx.householdId } }),
     prisma.session.findMany({ where: { userId: user.id, expiresAt: { gt: new Date() } }, orderBy: { lastSeenAt: "desc" }, take: 10 }),
+    prisma.telegramIdentity.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" } }),
   ]);
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -65,7 +68,29 @@ export default async function SettingsPage() {
       </Card>
       <Card>
         <CardHeader title="Bot Telegram" />
-        <p className="p-4 text-sm text-slate-600 sm:p-5">Hubungkan bot Telegram untuk mencatat transaksi lewat chat. Fitur ini hadir di Tahap 2.</p>
+        <div className="space-y-3 p-4 text-sm text-slate-600 sm:p-5">
+          <p>
+            Status:{" "}
+            {telegramReady ? <Badge tone="green">Bot aktif</Badge> : <Badge tone="amber">Belum dikonfigurasi</Badge>}
+          </p>
+          {!telegramReady && (
+            <p>
+              Isi <code>TELEGRAM_BOT_TOKEN</code>, <code>TELEGRAM_WEBHOOK_SECRET</code>, dan <code>TELEGRAM_ALLOWED_USER_IDS</code> di file .env server,
+              lalu jalankan <code>npm run telegram:webhook -- set</code>. Panduan lengkap ada di README.
+            </p>
+          )}
+          {telegramIds.length > 0 ? (
+            <ul className="space-y-1">
+              {telegramIds.map((t) => (
+                <li key={t.id}>
+                  Terhubung: <span className="font-medium text-slate-800">{t.username ? `@${t.username}` : t.firstName ?? "Akun Telegram"}</span> (ID {t.telegramUserId.toString()})
+                </li>
+              ))}
+            </ul>
+          ) : (
+            telegramReady && <p>Kirim /start ke bot dari akun Telegram yang diizinkan untuk menghubungkannya.</p>
+          )}
+        </div>
       </Card>
     </div>
   );

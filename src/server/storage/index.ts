@@ -1,7 +1,7 @@
 /**
  * Penyimpanan objek privat untuk foto struk.
- * - "s3": S3-compatible (MinIO untuk self-hosted). Bucket privat, tidak ada URL publik.
- * - "local": folder di disk (development tanpa MinIO).
+ * - "s3": S3-compatible (Garage, SeaweedFS, dll.). Bucket privat, tidak ada URL publik.
+ * - "local": folder di disk (default; di Docker volume `receipts`).
  * - "memory": hanya untuk test.
  * Foto selalu diakses lewat aplikasi setelah cek login (lihat /api/receipts/[id]/image).
  */

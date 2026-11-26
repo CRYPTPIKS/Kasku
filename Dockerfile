@@ -19,7 +19,7 @@ FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates tini && rm -rf /var/lib/apt/lists/* \
   && groupadd -r kasku && useradd -r -g kasku -d /app kasku \
-  && mkdir -p /data/tesseract && chown kasku:kasku /data/tesseract
+  && mkdir -p /data/tesseract /data/receipts && chown kasku:kasku /data/tesseract /data/receipts && chmod 700 /data/receipts
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 
 # Aplikasi Next.js (standalone)

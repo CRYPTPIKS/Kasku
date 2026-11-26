@@ -7,13 +7,16 @@ name: kasku
 # Konfigurasi struk yang dipakai bersama oleh app dan worker.
 x-receipt-env: &receipt-env
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-  STORAGE_DRIVER: s3
-  S3_ENDPOINT: http://minio:9000
+  # Foto struk disimpan di volume privat `receipts` (dipakai bersama app, worker, bot).
+  # Mau pakai S3/Garage/SeaweedFS sendiri: STORAGE_DRIVER=s3 + S3_* di .env.
+  STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+  LOCAL_STORAGE_DIR: /data/receipts
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
   S3_BUCKET: ${S3_BUCKET:-kasku-receipts}
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-  S3_SECRET_KEY: ${S3_SECRET_KEY}
-  S3_REGION: us-east-1
-  S3_FORCE_PATH_STYLE: "true"
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
   RECEIPT_PROVIDER: ${RECEIPT_PROVIDER:-tesseract}
   RECEIPT_HTTP_URL: ${RECEIPT_HTTP_URL:-}
   RECEIPT_HTTP_TOKEN: ${RECEIPT_HTTP_TOKEN:-}
@@ -39,13 +42,12 @@ services:
   app:
     build: .
     image: kasku-app:latest
+    pull_policy: build
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-kasku}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kasku}?schema=public
@@ -57,19 +59,21 @@ services:
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
       <<: *receipt-env
       TZ: Asia/Jakarta
+    volumes:
+      - receipts:/data/receipts
     networks: [internal, web]
     # Port tidak dibuka ke host; akses lewat Caddy.
 
   # Worker pembaca struk (OCR) dari antrean BullMQ. Image sama dengan app.
   worker:
+    build: .
     image: kasku-app:latest
+    pull_policy: build
     restart: unless-stopped
     depends_on:
       app:
         condition: service_started
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     command: ["node_modules/.bin/tsx", "src/worker/index.ts"]
     environment:
@@ -83,6 +87,7 @@ services:
       TZ: Asia/Jakarta
     volumes:
       - tesseract_data:/data/tesseract
+      - receipts:/data/receipts
     healthcheck:
       disable: true
     networks: [internal]
@@ -91,15 +96,15 @@ services:
   # Aktifkan dengan: docker compose --profile polling up -d
   # Jangan dipakai bersamaan dengan webhook.
   bot:
+    build: .
     image: kasku-app:latest
+    pull_policy: build
     restart: unless-stopped
     profiles: [polling]
     depends_on:
       app:
         condition: service_started
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     command: ["node_modules/.bin/tsx", "scripts/telegram-polling.ts"]
     environment:
@@ -111,6 +116,8 @@ services:
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
       <<: *receipt-env
       TZ: Asia/Jakarta
+    volumes:
+      - receipts:/data/receipts
     healthcheck:
       disable: true
     networks: [internal]
@@ -128,25 +135,6 @@ services:
       retries: 5
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-    networks: [internal]
-
-  # Penyimpanan foto struk (S3-compatible). Hanya di jaringan internal, tanpa port publik
-  # dan tanpa bucket publik: foto hanya bisa dibuka lewat aplikasi setelah login.
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: ["server", "/data"]
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?Isi S3_ACCESS_KEY di .env}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?Isi S3_SECRET_KEY di .env}
-      MINIO_BROWSER: "off"
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks: [internal]
 
   caddy:
@@ -189,7 +177,7 @@ services:
 volumes:
   pgdata:
   redisdata:
-  miniodata:
+  receipts:
   tesseract_data:
   caddy_data:
   caddy_config:

@@ -164,6 +164,34 @@ Alternatif: akses lewat Tailscale/WireGuard.
 Jika benar-benar tanpa HTTPS (tidak disarankan), set `DOMAIN=:80` dan
 `COOKIE_SECURE=false`.
 
+### Home lab: server LAN yang sudah menjalankan service lain
+
+Kalau port 80/443 sudah dipakai (mis. oleh reverse proxy lain) dan server
+tidak punya alamat publik:
+
+```bash
+# .env
+HTTP_PORT=8088                 # port host untuk dashboard
+HTTPS_PORT=8443                # port host yang tidak dipakai (wajib unik)
+DOMAIN=:80                     # Caddy melayani HTTP biasa
+APP_URL=http://10.10.20.21:8088
+COOKIE_SECURE=false
+```
+
+```bash
+docker compose --profile polling up -d --build
+```
+
+Profil `polling` menyalakan service `bot` yang mengambil pesan Telegram
+dengan `getUpdates`, jadi tidak perlu webhook atau port yang terbuka ke
+internet (server cukup bisa keluar ke `api.telegram.org`). Jangan pasang
+webhook bersamaan dengan mode ini.
+
+HTTP biasa hanya untuk jaringan rumah yang kamu percaya. Untuk HTTPS, taruh
+Kasku di belakang reverse proxy yang sudah ada (arahkan ke
+`10.10.20.21:8088`, lalu set `APP_URL=https://…` dan `COOKIE_SECURE=true`)
+atau akses lewat Tailscale/WireGuard.
+
 ## Instalasi lokal (development)
 
 ```bash
@@ -212,6 +240,7 @@ untuk mencoba alur tanpa OCR sungguhan.
 | `STORAGE_DRIVER` | – | `s3` (Docker), `local` (default non-Docker, folder `LOCAL_STORAGE_DIR` = `./storage`). |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | ya (Docker) | Kredensial MinIO (secret minimal 8 karakter). |
 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_FORCE_PATH_STYLE` | – | Default `kasku-receipts`, MinIO internal. Bucket dibuat otomatis, privat. |
+| `HTTP_PORT`, `HTTPS_PORT` | – | Port host untuk Caddy, default 80 dan 443. |
 | `RECEIPT_PROVIDER` | – | `tesseract` (default), `http`, atau `mock`. |
 | `RECEIPT_HTTP_URL`, `RECEIPT_HTTP_TOKEN` | untuk `http` | Layanan OCR/AI sendiri, lihat docs/RECEIPT_PROVIDERS.md. |
 | `TESSERACT_LANGS`, `TESSERACT_CACHE_DIR`, `TESSERACT_LANG_PATH` | – | Bahasa OCR (`ind+eng`), cache data bahasa, atau sumber data bahasa offline. |

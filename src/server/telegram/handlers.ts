@@ -25,6 +25,7 @@ import { ensureReceiptRuntime } from "../receipts/runtime";
 import { downloadTelegramFile } from "./files";
 import { choiceKeyboard, draftKeyboard, esc, HELP_TEXT, savedKeyboard, transactionSummary } from "./format";
 import { resolveIdentity } from "./identity";
+import { cmdAnggaran, cmdDebts, cmdInvestasi, handleFinanceIntent, handlePendingCallback, notifyBudgetAfterSave } from "./finance-handlers";
 
 export interface BotState {
   svc: ServiceContext;
@@ -173,9 +174,6 @@ async function cmdTransaksi(ctx: BotContext) {
   return reply(ctx, `<b>10 transaksi terakhir</b>\n${lines.join("\n")}`);
 }
 
-const comingSoon = (what: string) => async (ctx: BotContext) =>
-  reply(ctx, `${what} segera hadir di versi berikutnya. Sementara itu, pantau lewat dashboard.`);
-
 // ---------------------------------------------------------------------------
 // Pesan teks
 // ---------------------------------------------------------------------------
@@ -271,12 +269,8 @@ async function handleText(ctx: BotContext) {
     return reply(ctx, `${esc(parsed.question ?? "Berapa nominalnya?")} Kirim ulang lengkap dengan nominal, mis. <code>${esc(text)} 50rb</code>`);
   }
   if (!["income", "expense", "transfer"].includes(parsed.intent)) {
-    const label =
-      parsed.intent.startsWith("debt") ? "Hutang/piutang" : "Investasi";
-    return reply(
-      ctx,
-      `${label} dikenali (${esc(formatRupiah(parsed.amount))}${parsed.counterparty ? `, ${esc(parsed.counterparty)}` : ""}). Pencatatan ${label.toLowerCase()} lewat bot hadir di tahap berikutnya. Untuk sekarang catat lewat dashboard ya.`,
-    );
+    await setAwaiting(ctx.state.telegramUserId, null);
+    return handleFinanceIntent(ctx, parsed, text);
   }
 
   const t = await createTransaction(
@@ -344,6 +338,7 @@ async function handlePhoto(ctx: BotContext) {
 async function handleCallback(ctx: BotContext) {
   const data = ctx.callbackQuery?.data ?? "";
   const [prefix, action, id, arg] = data.split(":");
+  if (prefix === "pa" && action && id) return handlePendingCallback(ctx, action, id, arg);
   if (prefix !== "tx" || !action || !id) return ctx.answerCallbackQuery();
   const svc = ctx.state.svc;
 
@@ -359,7 +354,9 @@ async function handleCallback(ctx: BotContext) {
         const saved = await patchTransaction(svc, id, { status: "confirmed" });
         await learnCategory(svc, saved).catch(() => undefined);
         await ctx.answerCallbackQuery({ text: "Tersimpan ✅" });
-        return showTransaction(ctx, saved, undefined, true);
+        await showTransaction(ctx, saved, undefined, true);
+        if (saved.type === "expense") await notifyBudgetAfterSave(ctx);
+        return;
       }
       case "edit": {
         const t = await patchTransaction(svc, id, { status: "draft" });
@@ -486,10 +483,10 @@ export function registerHandlers(bot: Bot<BotContext>, allowedUserIds: Set<strin
   bot.command("saldo", cmdSaldo);
   bot.command("ringkasan", cmdRingkasan);
   bot.command("transaksi", cmdTransaksi);
-  bot.command("anggaran", comingSoon("Anggaran"));
-  bot.command("hutang", comingSoon("Daftar hutang"));
-  bot.command("piutang", comingSoon("Daftar piutang"));
-  bot.command("investasi", comingSoon("Ringkasan investasi"));
+  bot.command("anggaran", cmdAnggaran);
+  bot.command("hutang", cmdDebts("payable"));
+  bot.command("piutang", cmdDebts("receivable"));
+  bot.command("investasi", cmdInvestasi);
   bot.command("batal", async (ctx) => {
     await setAwaiting(ctx.state.telegramUserId, null);
     return reply(ctx, "Dibatalkan. Draf yang sudah dibuat tetap ada dan bisa dihapus dari pesannya atau dashboard.");

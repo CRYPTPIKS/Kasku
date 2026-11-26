@@ -103,3 +103,31 @@ export function toDateTimeInput(d: Date): string {
 export function addDays(d: Date, days: number): Date {
   return new Date(d.getTime() + days * 86400000);
 }
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * Tanggal jatuh tempo bulanan dalam WIB: `n` bulan setelah `start`, pada hari `day`
+ * (dipotong ke akhir bulan, mis. tanggal 31 di Februari -> 28/29). Jam 00:00 WIB.
+ */
+export function addMonthsJakarta(start: Date, n: number, day?: number): Date {
+  const p = jakartaParts(start);
+  const total = p.year * 12 + (p.month - 1) + n;
+  const year = Math.floor(total / 12);
+  const month = (total % 12) + 1;
+  const d = Math.min(day ?? p.day, daysInMonth(year, month));
+  return jakartaMidnight(year, month, d);
+}
+
+/** Awal hari (00:00 WIB) dari sebuah instant. */
+export function startOfJakartaDay(d: Date): Date {
+  const p = jakartaParts(d);
+  return jakartaMidnight(p.year, p.month, p.day);
+}
+
+/** Selisih hari kalender WIB (b - a). */
+export function jakartaDayDiff(a: Date, b: Date): number {
+  return Math.round((startOfJakartaDay(b).getTime() - startOfJakartaDay(a).getTime()) / 86400000);
+}

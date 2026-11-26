@@ -77,6 +77,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-kasku}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kasku}?schema=public
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       RECEIPT_WORKER_CONCURRENCY: ${RECEIPT_WORKER_CONCURRENCY:-1}
+      REMINDER_INTERVAL_MINUTES: ${REMINDER_INTERVAL_MINUTES:-15}
       TESSERACT_CACHE_DIR: /data/tesseract
       <<: *receipt-env
       TZ: Asia/Jakarta

@@ -1,14 +1,15 @@
 /**
- * Mode polling untuk DEVELOPMENT LOKAL (tanpa domain publik/HTTPS).
+ * Mode polling untuk server tanpa alamat publik (development lokal atau home lab).
  *   npm run telegram:polling
+ * Di production (Docker) dipakai service `bot` dengan TELEGRAM_POLLING=true.
  * Menghapus webhook yang aktif, lalu mengambil update dengan getUpdates.
  * Update tetap lewat processUpdate() sehingga idempotensi & whitelist sama dengan webhook.
  */
 import { getBot, processUpdate } from "../src/server/telegram/bot";
 
 async function main() {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Polling hanya untuk development. Di production gunakan webhook (npm run telegram:webhook -- set).");
+  if (process.env.NODE_ENV === "production" && process.env.TELEGRAM_POLLING !== "true") {
+    throw new Error("Di production gunakan webhook (npm run telegram:webhook -- set), atau set TELEGRAM_POLLING=true untuk mode polling.");
   }
   const { bot, ready } = getBot();
   await ready;
@@ -16,10 +17,12 @@ async function main() {
   console.log(`✓ Polling aktif untuk @${bot.botInfo.username}. Tekan Ctrl+C untuk berhenti.`);
   let offset = 0;
   let running = true;
-  process.on("SIGINT", () => {
+  const stop = () => {
     running = false;
     console.log("\nBerhenti…");
-  });
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
   while (running) {
     try {
       const updates = await bot.api.getUpdates({ offset, timeout: 25, allowed_updates: ["message", "callback_query"] });

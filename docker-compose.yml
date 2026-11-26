@@ -87,6 +87,34 @@ services:
       disable: true
     networks: [internal]
 
+  # Bot Telegram mode polling, untuk server tanpa alamat publik (LAN/home lab).
+  # Aktifkan dengan: docker compose --profile polling up -d
+  # Jangan dipakai bersamaan dengan webhook.
+  bot:
+    image: kasku-app:latest
+    restart: unless-stopped
+    profiles: [polling]
+    depends_on:
+      app:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: ["node_modules/.bin/tsx", "scripts/telegram-polling.ts"]
+    environment:
+      RUN_MIGRATIONS: "false" # migrasi dijalankan oleh service app
+      TELEGRAM_POLLING: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kasku}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kasku}?schema=public
+      APP_URL: ${APP_URL:?Isi APP_URL di .env}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+      <<: *receipt-env
+      TZ: Asia/Jakarta
+    healthcheck:
+      disable: true
+    networks: [internal]
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -126,9 +154,10 @@ services:
     restart: unless-stopped
     depends_on: [app]
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      # Ubah lewat HTTP_PORT/HTTPS_PORT di .env kalau 80/443 sudah dipakai service lain.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
     environment:
       DOMAIN: ${DOMAIN:-localhost}
     volumes:

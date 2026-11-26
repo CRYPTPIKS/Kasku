@@ -106,11 +106,42 @@ Kartu kredit adalah rekening dengan saldo negatif (tagihan). Kekayaan bersih
 - CSV dinetralkan dari formula injection.
 - Rahasia hanya dari environment variable; `.env` tidak di-commit.
 
+## Bot Telegram (Tahap 2)
+
+```
+Telegram ──POST──▶ /api/telegram/webhook
+                     │ 1. cek header secret (perbandingan waktu-konstan)
+                     ▼
+               processUpdate()
+                     │ 2. INSERT ProcessedTelegramUpdate(update_id)  ── duplikat? stop
+                     ▼
+               grammY bot.handleUpdate()
+                     │ 3. middleware: chat pribadi + TELEGRAM_ALLOWED_USER_IDS
+                     │ 4. TelegramIdentity → ServiceContext (source = "telegram")
+                     ▼
+               handlers.ts ──▶ parseTransactionText() ──▶ services/transactions
+```
+
+- `src/lib/parsing/transaction-text.ts`: parser murni berbasis aturan
+  (niat, nominal, rekening dari alias, kategori dari kata kunci/kebiasaan,
+  pihak hutang, cicilan, unit & harga investasi). Jika ada yang kurang, ia
+  mengembalikan `missing` + satu `question`.
+- Transaksi dari bot selalu dibuat sebagai **draf** (`source = telegram_text`)
+  dan baru `confirmed` saat tombol Simpan ditekan dan datanya lengkap.
+- Tombol inline memakai `callback_data` `tx:<aksi>:<id>[:<arg>]` (≤ 64 byte).
+  Setiap aksi tetap lewat service, jadi validasi household & audit log sama
+  dengan dashboard.
+- `TelegramChatState` menyimpan input yang sedang ditunggu (nominal baru,
+  pembagian) selama 30 menit; `/batal` menghapusnya.
+- `CategoryMerchantRule` diisi saat transaksi disimpan lewat bot, dipakai
+  untuk saran kategori berikutnya.
+- Idempotensi bersifat *at-most-once*: update dicatat sebelum diproses. Jika
+  handler gagal, status `failed` disimpan dan pengguna diberi tahu, sehingga
+  Telegram tidak memicu pembuatan transaksi ganda.
+- Polling (`scripts/telegram-polling.ts`) memakai `processUpdate()` yang sama.
+
 ## Rencana tahap berikutnya
 
-- **Tahap 2:** bot grammY, webhook `/api/telegram/webhook` dengan
-  `X-Telegram-Bot-Api-Secret-Token`, whitelist `TELEGRAM_ALLOWED_USER_IDS`,
-  idempotensi via `ProcessedTelegramUpdate`, parser teks Indonesia.
 - **Tahap 3:** MinIO + presigned URL berumur pendek, BullMQ worker,
   interface `ReceiptExtractionProvider` (mock, Tesseract lokal, opsional AI).
 - **Tahap 4:** anggaran, hutang/piutang + cicilan, investasi, pengingat,

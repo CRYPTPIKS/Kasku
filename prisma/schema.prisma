@@ -125,9 +125,10 @@ model TelegramIdentity {
 // Status percakapan per pengguna Telegram (mis. bot sedang menunggu nominal baru).
 model TelegramChatState {
   telegramUserId BigInt    @id
-  // amount | split | description
+  // amount | split | receipt_amount
   awaiting       String?
   transactionId  String?
+  receiptId      String?
   expiresAt      DateTime? @db.Timestamptz(3)
   updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
 }

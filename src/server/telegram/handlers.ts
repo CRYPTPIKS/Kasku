@@ -20,6 +20,9 @@ import {
   type TransactionWithRelations,
 } from "../services/transactions";
 import type { TransactionInput } from "../validation/transaction";
+import { createDraftFromReceipt, ingestReceipt, MAX_RECEIPT_BYTES } from "../receipts/service";
+import { ensureReceiptRuntime } from "../receipts/runtime";
+import { downloadTelegramFile } from "./files";
 import { choiceKeyboard, draftKeyboard, esc, HELP_TEXT, savedKeyboard, transactionSummary } from "./format";
 import { resolveIdentity } from "./identity";
 
@@ -39,8 +42,8 @@ const HTML = { parse_mode: "HTML" as const };
 async function setAwaiting(telegramUserId: bigint, awaiting: string | null, transactionId: string | null = null) {
   await prisma.telegramChatState.upsert({
     where: { telegramUserId },
-    create: { telegramUserId, awaiting, transactionId, expiresAt: awaiting ? new Date(Date.now() + STATE_TTL_MS) : null },
-    update: { awaiting, transactionId, expiresAt: awaiting ? new Date(Date.now() + STATE_TTL_MS) : null },
+    create: { telegramUserId, awaiting, transactionId, receiptId: null, expiresAt: awaiting ? new Date(Date.now() + STATE_TTL_MS) : null },
+    update: { awaiting, transactionId, receiptId: null, expiresAt: awaiting ? new Date(Date.now() + STATE_TTL_MS) : null },
   });
 }
 
@@ -179,8 +182,20 @@ const comingSoon = (what: string) => async (ctx: BotContext) =>
 
 async function handleAwaitingInput(ctx: BotContext, text: string): Promise<boolean> {
   const state = await getAwaiting(ctx.state.telegramUserId);
-  if (!state?.transactionId) return false;
   const svc = ctx.state.svc;
+
+  if (state?.awaiting === "receipt_amount" && state.receiptId) {
+    const amount = parseAmount(text);
+    if (amount === null || amount <= 0) {
+      await reply(ctx, "Total belum terbaca. Contoh: <code>43rb</code>. Kirim /batal untuk membatalkan.");
+      return true;
+    }
+    await setAwaiting(ctx.state.telegramUserId, null);
+    const t = await createDraftFromReceipt(state.receiptId, { amount, ctx: svc });
+    if (!(await askMissing(ctx, t))) await showTransaction(ctx, t, "Draf dibuat dari struk.");
+    return true;
+  }
+  if (!state?.transactionId) return false;
 
   if (state.awaiting === "amount") {
     const amount = parseAmount(text);
@@ -279,6 +294,47 @@ async function handleText(ctx: BotContext) {
     { source: "telegram_text" },
   );
   if (!(await askMissing(ctx, t))) await showTransaction(ctx, t);
+}
+
+// ---------------------------------------------------------------------------
+// Foto struk
+// ---------------------------------------------------------------------------
+
+async function handlePhoto(ctx: BotContext) {
+  const msg = ctx.message;
+  if (!msg) return;
+  let fileId: string | null = null;
+  let size = 0;
+  if (msg.photo?.length) {
+    const largest = msg.photo[msg.photo.length - 1]!;
+    fileId = largest.file_id;
+    size = largest.file_size ?? 0;
+  } else if (msg.document) {
+    if (!msg.document.mime_type?.startsWith("image/")) {
+      return reply(ctx, "Kirim struk sebagai foto (JPG/PNG), ya.");
+    }
+    fileId = msg.document.file_id;
+    size = msg.document.file_size ?? 0;
+  }
+  if (!fileId) return;
+  if (size > MAX_RECEIPT_BYTES) return reply(ctx, "Foto terlalu besar (maks. 10 MB).");
+
+  await setAwaiting(ctx.state.telegramUserId, null);
+  await reply(ctx, "Struk sedang diproses.", { reply_parameters: { message_id: msg.message_id } });
+  ensureReceiptRuntime();
+  const data = await downloadTelegramFile(ctx.api, fileId);
+  const { receipt, duplicateOf } = await ingestReceipt(ctx.state.svc, {
+    data,
+    mimeType: msg.document?.mime_type ?? "image/jpeg",
+    telegram: { fileId, chatId: msg.chat.id, messageId: msg.message_id },
+  });
+  if (duplicateOf) {
+    if (receipt.transactionId) {
+      const t = await getTransaction(ctx.state.svc, receipt.transactionId, { includeDeleted: true }).catch(() => null);
+      if (t && !t.deletedAt) return showTransaction(ctx, t, "Struk ini sudah pernah dikirim. Ini transaksinya:");
+    }
+    return reply(ctx, "Struk ini sudah pernah dikirim sebelumnya, jadi tidak dibuat transaksi baru. Cek di dashboard menu Transaksi → Struk.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -441,9 +497,7 @@ export function registerHandlers(bot: Bot<BotContext>, allowedUserIds: Set<strin
 
   bot.on("callback_query:data", handleCallback);
   bot.on("message:text", handleText);
-  bot.on(["message:photo", "message:document"], (ctx) =>
-    reply(ctx, "📷 Pembacaan foto struk segera hadir. Untuk sekarang, ketik transaksinya ya, mis. <code>belanja 120rb indomaret pakai cash</code>"),
-  );
+  bot.on(["message:photo", "message:document"], handlePhoto);
 
   bot.catch(async (err) => {
     const payload = toErrorPayload(err.error);

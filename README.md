@@ -1,12 +1,12 @@
 # Kasku
 
 Pencatat keuangan pribadi yang di-host sendiri. Catat pemasukan, pengeluaran,
-dan transfer antar-rekening lewat dashboard web (dan segera lewat bot
-Telegram), lalu lihat saldo serta arus kas dalam Rupiah dengan zona waktu
+dan transfer antar-rekening lewat dashboard web atau bot Telegram (termasuk
+foto struk), lalu lihat saldo serta arus kas dalam Rupiah dengan zona waktu
 Asia/Jakarta.
 
-> **Status:** Tahap 1 (fondasi) dan Tahap 2 (bot Telegram) selesai. Foto
-> struk, anggaran, hutang/piutang, dan investasi menyusul di Tahap 3–4.
+> **Status:** Tahap 1 (fondasi), Tahap 2 (bot Telegram), dan Tahap 3 (foto
+> struk) selesai. Anggaran, hutang/piutang, dan investasi menyusul di Tahap 4.
 > Skema database untuk semuanya sudah disiapkan.
 
 ## Fitur Tahap 1
@@ -50,10 +50,31 @@ Asia/Jakarta.
 - Hutang/piutang dan investasi sudah dikenali parser, tetapi pencatatannya
   lewat bot aktif di Tahap 4.
 
+## Fitur Tahap 3: foto struk
+
+- Kirim foto struk ke bot (atau unggah di dashboard **Transaksi → Struk**).
+  Bot membalas "Struk sedang diproses.", lalu mengirim draf berisi toko,
+  tanggal, total, diskon/pajak/layanan, metode bayar, dan daftar item.
+- Draf memakai tombol yang sama dengan Tahap 2. Rekening ditebak dari metode
+  bayar (mis. `DEBIT BCA`) hanya bila jelas; kalau tidak, bot bertanya.
+- Kalau struk tidak terbaca, foto tetap disimpan dan bot meminta total
+  (balas saja `43rb`). Di dashboard ada isian manual dan tombol **Baca ulang**.
+- Foto yang sama persis (SHA-256) tidak diproses dua kali.
+- OCR default **gratis, lokal, dan offline**: Tesseract (`ind+eng`, data
+  bahasa ikut terpasang, tidak diunduh saat runtime). Bisa diganti
+  penyedia lain lewat `RECEIPT_PROVIDER`, lihat
+  [docs/RECEIPT_PROVIDERS.md](docs/RECEIPT_PROVIDERS.md).
+- Foto disimpan di MinIO (bucket privat, tanpa port publik) dan hanya bisa
+  dibuka lewat aplikasi setelah login (`Cache-Control: private, no-store`).
+- Pembacaan berjalan di service `worker` lewat antrean Redis/BullMQ, jadi
+  webhook Telegram tetap cepat. Tanpa `REDIS_URL` (development), struk
+  diproses langsung di proses aplikasi.
+
 ## Kebutuhan server
 
 - Linux dengan Docker Engine 24+ dan Docker Compose v2.
-- Minimal 1 vCPU, 1 GB RAM, 5 GB disk (Raspberry Pi 4 64-bit cukup).
+- Minimal 1 vCPU, 2 GB RAM (OCR Tesseract butuh ±300 MB saat membaca),
+  10 GB disk untuk foto struk (Raspberry Pi 4 64-bit 4 GB cukup).
 - Untuk HTTPS publik: domain yang mengarah ke server, port 80 & 443 terbuka.
   Untuk jaringan rumah saja: lihat bagian [HTTPS di LAN](#https-di-jaringan-lokal).
 
@@ -65,7 +86,8 @@ Untuk development tanpa Docker: Node.js 22+ dan PostgreSQL 16.
 git clone https://github.com/CRYPTPIKS/kasku.git
 cd kasku
 cp .env.example .env
-# Edit .env: isi POSTGRES_PASSWORD (acak), APP_URL, DOMAIN
+# Edit .env: isi POSTGRES_PASSWORD, REDIS_PASSWORD, S3_ACCESS_KEY,
+# S3_SECRET_KEY (semuanya acak), APP_URL, DOMAIN
 #   openssl rand -hex 24      # contoh membuat password acak
 docker compose up -d --build
 ```
@@ -89,6 +111,9 @@ Layanan di `docker-compose.yml`:
 |---|---|
 | `db` | PostgreSQL 16, data di volume `pgdata` |
 | `app` | Next.js (port 3000, hanya di jaringan internal) |
+| `worker` | Pembaca struk (OCR) dari antrean, image sama dengan `app` |
+| `redis` | Antrean BullMQ (dengan password, hanya jaringan internal) |
+| `minio` | Penyimpanan foto struk, bucket privat, tanpa port/konsol publik |
 | `caddy` | Reverse proxy + HTTPS otomatis (Let's Encrypt) |
 | `backup` | `pg_dump` harian pukul 02.00 WIB ke `./backups`, disimpan 14 hari |
 
@@ -129,6 +154,13 @@ npm run dev                             # http://localhost:3000
 
 Set `COOKIE_SECURE=false` di `.env` saat development lewat `http://`.
 
+Foto struk saat development: tanpa pengaturan apa pun, foto disimpan di
+`./storage` dan dibaca langsung oleh proses `npm run dev`. Untuk mencoba
+antrean seperti production, nyalakan Redis (dan MinIO bila mau) dari
+`docker-compose.dev.yml`, isi `REDIS_URL=redis://localhost:6379`, lalu
+jalankan `npm run worker` di terminal lain. `RECEIPT_PROVIDER=mock` berguna
+untuk mencoba alur tanpa OCR sungguhan.
+
 ## Environment variables
 
 | Variabel | Wajib | Keterangan |
@@ -144,13 +176,21 @@ Set `COOKIE_SECURE=false` di `.env` saat development lewat `http://`.
 | `SEED_SAMPLE_ACCOUNTS` | – | `false` untuk tidak membuat contoh rekening. |
 | `BACKUP_KEEP_DAYS` | – | Lama penyimpanan backup otomatis, default 14. |
 | `TEST_DATABASE_URL` | – | Database test integrasi (nama harus berakhiran `_test`). |
-
 | `TELEGRAM_BOT_TOKEN` | untuk bot | Token dari @BotFather. |
 | `TELEGRAM_WEBHOOK_SECRET` | untuk webhook | Rahasia 16–256 karakter (`A-Z a-z 0-9 _ -`). |
 | `TELEGRAM_ALLOWED_USER_IDS` | untuk bot | ID numerik akun Telegram yang diizinkan, pisahkan koma. |
 
-Variabel object storage ditambahkan di Tahap 3. Nilai rahasia tidak pernah
-dicetak ke log.
+| `REDIS_PASSWORD` | ya (Docker) | Password Redis. Gunakan hex acak (tanpa simbol, karena masuk ke URL). |
+| `REDIS_URL` | – | Non-Docker: `redis://:pass@host:6379/0`. Kosong = struk diproses langsung tanpa antrean. |
+| `STORAGE_DRIVER` | – | `s3` (Docker), `local` (default non-Docker, folder `LOCAL_STORAGE_DIR` = `./storage`). |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | ya (Docker) | Kredensial MinIO (secret minimal 8 karakter). |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_FORCE_PATH_STYLE` | – | Default `kasku-receipts`, MinIO internal. Bucket dibuat otomatis, privat. |
+| `RECEIPT_PROVIDER` | – | `tesseract` (default), `http`, atau `mock`. |
+| `RECEIPT_HTTP_URL`, `RECEIPT_HTTP_TOKEN` | untuk `http` | Layanan OCR/AI sendiri, lihat docs/RECEIPT_PROVIDERS.md. |
+| `TESSERACT_LANGS`, `TESSERACT_CACHE_DIR`, `TESSERACT_LANG_PATH` | – | Bahasa OCR (`ind+eng`), cache data bahasa, atau sumber data bahasa offline. |
+| `RECEIPT_WORKER_CONCURRENCY` | – | Jumlah struk yang dibaca bersamaan, default 1. |
+
+Nilai rahasia tidak pernah dicetak ke log.
 
 ## Migrasi database
 
@@ -217,6 +257,13 @@ menghapus file lebih tua dari `BACKUP_KEEP_DAYS` hari. Salin folder
 ./scripts/backup.sh
 ```
 
+Foto struk ada di volume `miniodata`. Backup juga volume ini, misalnya:
+
+```bash
+docker run --rm -v kasku_miniodata:/data -v "$PWD/backups":/out alpine \
+  tar czf /out/struk-$(date +%Y%m%d).tar.gz -C /data .
+```
+
 **Restore:**
 
 ```bash
@@ -241,7 +288,7 @@ docker compose start app
 ```bash
 npm test                 # semua test (unit + integrasi)
 npm run test:unit        # parser nominal, parser teks transaksi, aturan double-entry
-npm run test:integration # layanan, endpoint API, bot & webhook Telegram (API Telegram disadap, tanpa jaringan)
+npm run test:integration # layanan, endpoint API, bot & webhook Telegram, struk (tanpa jaringan/OCR sungguhan)
 npm run lint
 npm run typecheck
 ```

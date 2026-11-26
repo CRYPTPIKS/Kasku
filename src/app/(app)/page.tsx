@@ -44,6 +44,21 @@ export default async function DashboardPage() {
         </Card>
       )}
 
+      {(d.receipts.processing > 0 || d.receipts.failed > 0) && (
+        <Link href="/transaksi/struk" className="block">
+          <Card className={`p-4 text-sm ${d.receipts.failed > 0 ? "border-red-200 bg-red-50/60 text-red-900" : "border-blue-200 bg-blue-50/60 text-blue-900"}`}>
+            🧾{" "}
+            {[
+              d.receipts.processing > 0 ? `${d.receipts.processing} struk sedang dibaca` : "",
+              d.receipts.failed > 0 ? `${d.receipts.failed} struk gagal dibaca dan perlu diisi manual` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            <span className="ml-1 font-medium">→</span>
+          </Card>
+        </Link>
+      )}
+
       {d.drafts.length > 0 && (
         <Card className="border-amber-200">
           <CardHeader

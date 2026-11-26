@@ -1,3 +1,4 @@
+import { receiptStatusCounts } from "../receipts/service";
 import { currentMonthRange, previousMonth, monthRange } from "@/lib/dates";
 import { prisma } from "../db";
 import type { ServiceContext } from "../context";
@@ -10,7 +11,7 @@ export async function getDashboard(ctx: ServiceContext, now = new Date()) {
   const prev = previousMonth(month.year, month.month);
   const prevRange = monthRange(prev.year, prev.month);
 
-  const [accounts, totals, prevTotals, byCategory, recent, drafts] = await Promise.all([
+  const [accounts, totals, prevTotals, byCategory, recent, drafts, receipts] = await Promise.all([
     listAccounts(ctx),
     periodTotals(ctx, month.start, month.end),
     periodTotals(ctx, prevRange.start, prevRange.end),
@@ -22,6 +23,7 @@ export async function getDashboard(ctx: ServiceContext, now = new Date()) {
       take: 5,
       include: { category: { select: { name: true, icon: true } } },
     }),
+    receiptStatusCounts(ctx),
   ]);
 
   return {
@@ -33,5 +35,6 @@ export async function getDashboard(ctx: ServiceContext, now = new Date()) {
     byCategory,
     recent: recent.items,
     drafts,
+    receipts,
   };
 }

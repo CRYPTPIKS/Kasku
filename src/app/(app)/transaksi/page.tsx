@@ -46,6 +46,9 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
             <a href={`/api/export/transaksi${qs(sp, { page: undefined })}`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               Ekspor CSV
             </a>
+            <Link href="/transaksi/struk" className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              🧾 Struk
+            </Link>
             <LinkButton href="/transaksi/baru">+ Catat</LinkButton>
           </>
         }

@@ -8,14 +8,14 @@ Dokumen singkat tentang cara aplikasi disusun dan alasannya.
             ┌──────────── Docker Compose ─────────────┐
  Browser ──▶│ Caddy (HTTPS) ──▶ app (Next.js) ──▶ db   │
  Telegram ─▶│                     │       (PostgreSQL) │
- (Tahap 2)  │                     ├──▶ redis + worker  │  (Tahap 3)
-            │                     └──▶ MinIO (struk)   │  (Tahap 3)
+            │                     ├──▶ redis ──▶ worker (OCR)
+            │                     └──▶ MinIO (struk)   │
             │ backup (pg_dump harian) ──▶ ./backups    │
             └──────────────────────────────────────────┘
 ```
 
 Satu aplikasi Next.js (App Router) melayani dashboard web, API, dan nanti
-webhook Telegram. Pemrosesan struk yang lambat (OCR) akan berjalan di worker
+webhook Telegram. Pemrosesan struk yang lambat (OCR) berjalan di worker
 terpisah lewat antrean BullMQ agar webhook tetap cepat.
 
 ## Lapisan kode
@@ -50,6 +50,8 @@ worker, serta dites langsung.
   (`owner/admin/member/viewer`) sudah siap untuk keluarga.
 - **User** punya kolom `twoFactorEnabled/twoFactorSecret/recoveryCodes` dan
   `Session.verified` sebagai tempat 2FA nanti.
+- **Receipt** menyimpan foto (kunci objek, hash, asal Telegram) dan status
+  pembacaan; **ReceiptExtraction** menyimpan hasil tiap percobaan baca.
 - **Transaction** menyimpan nominal selalu positif + `type` + rekening
   asal/tujuan. Status `draft` belum memengaruhi saldo; `confirmed` sudah.
 - **LedgerEntry** adalah baris buku besar bertanda (+ masuk, − keluar).
@@ -140,9 +142,43 @@ Telegram ──POST──▶ /api/telegram/webhook
   Telegram tidak memicu pembuatan transaksi ganda.
 - Polling (`scripts/telegram-polling.ts`) memakai `processUpdate()` yang sama.
 
+## Foto struk (Tahap 3)
+
+```
+foto (bot / dashboard)
+   │ ingestReceipt(): cek ukuran ≤10 MB + magic bytes JPG/PNG/WEBP
+   │                  SHA-256 → struk sama? kembalikan yang lama
+   │                  simpan privat: receipts/<household>/<yyyy>/<mm>/<uuid>.jpg
+   ▼
+Receipt(status=queued) ──▶ antrean BullMQ "receipts" (atau langsung tanpa Redis)
+                              │
+                       worker: processReceipt()
+                              │ ReceiptExtractionProvider.extract(foto)
+                              │ → ReceiptExtraction (mentah + hasil urai)
+                     total ada?│
+               ┌──── ya ───────┴──── tidak / error ────┐
+               ▼                                        ▼
+  createDraftFromReceipt(): draf expense      status=failed, foto tetap ada
+  + kategori + rekening (jika jelas)          bot minta total → createDraftFromReceipt
+  + TransactionAttachment                     dashboard: isi manual / Baca ulang
+               │
+        ReceiptNotifier → pesan Telegram dengan tombol draf
+```
+
+- `src/server/receipts/providers/`: `mock`, `tesseract` (default, gratis),
+  `http` (layanan OCR/AI apa pun). Penyedia hanya mengembalikan teks atau
+  field terstruktur; parser `src/lib/parsing/receipt-text.ts` mengubah teks
+  OCR menjadi toko, tanggal, total, subtotal, diskon, pajak, biaya layanan,
+  metode bayar, dan item.
+- `src/server/storage/`: driver `s3` (MinIO), `local`, `memory` (test).
+  Foto tidak pernah diberi URL publik; dashboard membukanya lewat
+  `/api/receipts/:id/image` yang mengecek sesi dan household.
+- Status struk: `queued → processing → extracted | failed`. Struk yang sudah
+  jadi transaksi tidak diproses ulang, jadi retry antrean aman.
+- Draf dari struk tetap harus dikonfirmasi pengguna (tombol Simpan atau
+  dashboard), sama seperti draf dari teks.
+
 ## Rencana tahap berikutnya
 
-- **Tahap 3:** MinIO + presigned URL berumur pendek, BullMQ worker,
-  interface `ReceiptExtractionProvider` (mock, Tesseract lokal, opsional AI).
 - **Tahap 4:** anggaran, hutang/piutang + cicilan, investasi, pengingat,
   laporan lanjutan.

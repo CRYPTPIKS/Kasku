@@ -131,3 +131,41 @@ export function startOfJakartaDay(d: Date): Date {
 export function jakartaDayDiff(a: Date, b: Date): number {
   return Math.round((startOfJakartaDay(b).getTime() - startOfJakartaDay(a).getTime()) / 86400000);
 }
+
+/** Awal minggu (Senin 00:00 WIB) dari sebuah instant. */
+export function startOfJakartaWeek(d: Date): Date {
+  const p = jakartaParts(d);
+  const weekday = new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay(); // 0 = Minggu
+  const sinceMonday = (weekday + 6) % 7;
+  return addDays(jakartaMidnight(p.year, p.month, p.day), -sinceMonday);
+}
+
+export type RelativePeriod = "today" | "yesterday" | "week" | "last_week" | "month" | "last_month";
+
+/** Rentang [start, end) dalam WIB untuk periode relatif. */
+export function relativePeriodRange(period: RelativePeriod, now = new Date()): { start: Date; end: Date } {
+  const today = startOfJakartaDay(now);
+  switch (period) {
+    case "today":
+      return { start: today, end: addDays(today, 1) };
+    case "yesterday":
+      return { start: addDays(today, -1), end: today };
+    case "week": {
+      const s = startOfJakartaWeek(now);
+      return { start: s, end: addDays(s, 7) };
+    }
+    case "last_week": {
+      const s = startOfJakartaWeek(now);
+      return { start: addDays(s, -7), end: s };
+    }
+    case "month": {
+      const p = jakartaParts(now);
+      return monthRange(p.year, p.month);
+    }
+    case "last_month": {
+      const p = jakartaParts(now);
+      const prev = previousMonth(p.year, p.month);
+      return monthRange(prev.year, prev.month);
+    }
+  }
+}

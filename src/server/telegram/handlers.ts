@@ -1,5 +1,4 @@
 import type { Bot, Context } from "grammy";
-import { currentMonthRange, formatDate, formatMonth } from "@/lib/dates";
 import { formatRupiah } from "@/lib/money";
 import { findAmounts, parseAmount } from "@/lib/parsing/amount";
 import { merchantKey, parseTransactionText, suggestCategory } from "@/lib/parsing/transaction-text";
@@ -7,14 +6,12 @@ import { prisma } from "../db";
 import type { ServiceContext } from "../context";
 import { toErrorPayload } from "../errors";
 import { logger } from "../logger";
-import { listAccounts, summarizeBalances } from "../services/accounts";
+import { listAccounts } from "../services/accounts";
 import { listCategories } from "../services/categories";
-import { periodTotals, totalsByCategory } from "../services/reports";
 import {
   createTransaction,
   deleteTransaction,
   getTransaction,
-  listTransactions,
   toInput,
   updateTransaction,
   type TransactionWithRelations,
@@ -23,9 +20,11 @@ import type { TransactionInput } from "../validation/transaction";
 import { createDraftFromReceipt, ingestReceipt, MAX_RECEIPT_BYTES } from "../receipts/service";
 import { ensureReceiptRuntime } from "../receipts/runtime";
 import { downloadTelegramFile } from "./files";
-import { choiceKeyboard, draftKeyboard, esc, HELP_TEXT, savedKeyboard, transactionSummary } from "./format";
+import { choiceKeyboard, draftKeyboard, esc, HELP_TEXT, isUndoable, savedKeyboard, transactionSummary } from "./format";
 import { resolveIdentity } from "./identity";
 import { cmdAnggaran, cmdDebts, cmdInvestasi, handleFinanceIntent, handlePendingCallback, notifyBudgetAfterSave } from "./finance-handlers";
+import { detectQuestion } from "@/lib/parsing/question";
+import { answerQuestion, cmdRingkasan, cmdSaldo, cmdTransaksi, handleQuestionCallback, notUnderstoodKeyboard } from "./questions";
 
 export interface BotState {
   svc: ServiceContext;
@@ -136,44 +135,6 @@ async function askMissing(ctx: BotContext, t: TransactionWithRelations, edit = f
 // Perintah
 // ---------------------------------------------------------------------------
 
-async function cmdSaldo(ctx: BotContext) {
-  const accounts = await listAccounts(ctx.state.svc);
-  if (accounts.length === 0) return reply(ctx, "Belum ada rekening. Tambahkan dulu lewat dashboard.");
-  const total = summarizeBalances(accounts);
-  const lines = accounts.map((a) => `• ${esc(a.name)}: <b>${esc(formatRupiah(a.balance))}</b>`);
-  return reply(ctx, `<b>Saldo rekening</b>\n${lines.join("\n")}\n\nTotal bersih: <b>${esc(formatRupiah(total.net))}</b>`);
-}
-
-async function cmdRingkasan(ctx: BotContext) {
-  const m = currentMonthRange();
-  const [totals, cats] = await Promise.all([
-    periodTotals(ctx.state.svc, m.start, m.end),
-    totalsByCategory(ctx.state.svc, "expense", m.start, m.end),
-  ]);
-  const top = cats.slice(0, 5).map((c) => `• ${esc(c.name)}: ${esc(formatRupiah(c.total))}`);
-  return reply(
-    ctx,
-    [
-      `<b>Ringkasan ${esc(formatMonth(m.year, m.month))}</b>`,
-      `Pemasukan: <b>${esc(formatRupiah(totals.income))}</b>`,
-      `Pengeluaran: <b>${esc(formatRupiah(totals.expense))}</b>`,
-      `Selisih: <b>${esc(formatRupiah(totals.net))}</b>`,
-      top.length ? `\nPengeluaran terbesar:\n${top.join("\n")}` : "",
-    ].join("\n"),
-  );
-}
-
-async function cmdTransaksi(ctx: BotContext) {
-  const { items } = await listTransactions(ctx.state.svc, { pageSize: 10 });
-  if (items.length === 0) return reply(ctx, "Belum ada transaksi. Coba kirim: <code>keluar 25rb kopi pakai cash</code>");
-  const lines = items.map((t) => {
-    const title = t.description || t.merchant || t.category?.name || "Transaksi";
-    const draft = t.status === "draft" ? " <i>(draf)</i>" : "";
-    return `• ${esc(formatDate(t.occurredAt))} — ${esc(title)}: ${esc(formatRupiah(Number(t.amount)))}${draft}`;
-  });
-  return reply(ctx, `<b>10 transaksi terakhir</b>\n${lines.join("\n")}`);
-}
-
 // ---------------------------------------------------------------------------
 // Pesan teks
 // ---------------------------------------------------------------------------
@@ -244,6 +205,34 @@ async function handleAwaitingInput(ctx: BotContext, text: string): Promise<boole
   return false;
 }
 
+/** Batas waktu "hapus yang tadi": hanya transaksi yang dibuat lewat bot dalam 60 menit terakhir. */
+const UNDO_LAST_WINDOW_MS = 60 * 60 * 1000;
+
+async function offerUndoLast(ctx: BotContext) {
+  const svc = ctx.state.svc;
+  const last = await prisma.transaction.findFirst({
+    where: {
+      householdId: svc.householdId,
+      deletedAt: null,
+      createdById: svc.userId,
+      source: { in: ["telegram_text", "telegram_receipt"] },
+      type: { in: ["income", "expense", "transfer"] },
+      debtId: null,
+      investmentTransaction: null,
+      createdAt: { gte: new Date(Date.now() - UNDO_LAST_WINDOW_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!last) {
+    return reply(ctx, "Tidak ada transaksi dari bot dalam 1 jam terakhir. Untuk yang lebih lama, buka /transaksi atau dashboard.");
+  }
+  const t = await getTransaction(svc, last.id);
+  return reply(ctx, `${transactionSummary(t)}\n\n<b>Hapus transaksi terakhir ini?</b>`, {
+    reply_markup: { inline_keyboard: [[{ text: "Ya, hapus", callback_data: `tx:delok:${t.id}` }, { text: "Batal", callback_data: `tx:back:${t.id}` }]] },
+  });
+}
+
 async function handleText(ctx: BotContext) {
   const text = ctx.message?.text?.trim() ?? "";
   if (!text || text.startsWith("/")) return;
@@ -256,6 +245,16 @@ async function handleText(ctx: BotContext) {
     listCategories(svc),
     prisma.categoryMerchantRule.findMany({ where: { householdId: svc.householdId }, select: { merchantKey: true, categoryId: true } }),
   ]);
+  const question = detectQuestion(text, {
+    accounts: accounts.map((a) => ({ id: a.id, name: a.name, aliases: a.aliases })),
+    categories: categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, keywords: c.keywords })),
+  });
+  if (question) {
+    await setAwaiting(ctx.state.telegramUserId, null);
+    if (question.kind === "undo") return offerUndoLast(ctx);
+    return answerQuestion(ctx, question);
+  }
+
   const parsed = parseTransactionText(text, {
     accounts: accounts.map((a) => ({ id: a.id, name: a.name, aliases: a.aliases })),
     categories: categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, keywords: c.keywords })),
@@ -263,7 +262,11 @@ async function handleText(ctx: BotContext) {
   });
 
   if (!parsed.intent) {
-    return reply(ctx, "Maaf, aku belum paham. Coba: <code>keluar 75rb makan siang pakai cash</code>\nKetik /bantuan untuk contoh lain.");
+    return reply(
+      ctx,
+      "Maaf, aku belum paham. Untuk mencatat coba: <code>keluar 75rb makan siang pakai cash</code>\nAtau tanya, mis. <i>berapa saldo BCA?</i> Pilih salah satu:",
+      { reply_markup: notUnderstoodKeyboard() },
+    );
   }
   if (parsed.amount === null) {
     return reply(ctx, `${esc(parsed.question ?? "Berapa nominalnya?")} Kirim ulang lengkap dengan nominal, mis. <code>${esc(text)} 50rb</code>`);
@@ -339,6 +342,7 @@ async function handleCallback(ctx: BotContext) {
   const data = ctx.callbackQuery?.data ?? "";
   const [prefix, action, id, arg] = data.split(":");
   if (prefix === "pa" && action && id) return handlePendingCallback(ctx, action, id, arg);
+  if (prefix === "q" && action) return handleQuestionCallback(ctx, action);
   if (prefix !== "tx" || !action || !id) return ctx.answerCallbackQuery();
   const svc = ctx.state.svc;
 
@@ -436,6 +440,16 @@ async function handleCallback(ctx: BotContext) {
         await deleteTransaction(svc, id);
         await ctx.answerCallbackQuery({ text: "Dihapus." });
         return ctx.editMessageText("🗑 Transaksi dihapus. Admin masih bisa memulihkannya dari dashboard.");
+      }
+      case "undo": {
+        const t = await getTransaction(svc, id);
+        if (!isUndoable(t)) {
+          await ctx.answerCallbackQuery({ text: "Sudah lewat 10 menit. Pakai tombol Hapus.", show_alert: true });
+          return showTransaction(ctx, t, undefined, true);
+        }
+        await deleteTransaction(svc, id);
+        await ctx.answerCallbackQuery({ text: "Dibatalkan." });
+        return ctx.editMessageText("↩️ Transaksi dibatalkan dan tidak dihitung ke saldo.");
       }
       case "back": {
         const t = await getTransaction(svc, id);

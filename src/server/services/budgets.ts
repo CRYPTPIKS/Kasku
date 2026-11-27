@@ -50,7 +50,8 @@ export async function listBudgetStatus(ctx: ServiceContext, month?: { year: numb
       where: { householdId: ctx.householdId, isActive: true },
       include: { category: { select: { id: true, name: true, icon: true, sortOrder: true } }, periods: { where: { month: key } } },
     }),
-    totalsByCategory(ctx, "expense", start, end),
+    // Anggaran per kategori menghitung semua transaksi kategori itu, termasuk usaha.
+    totalsByCategory(ctx, "expense", start, end, { scope: "all" }),
     prisma.category.findMany({ where: { householdId: ctx.householdId, kind: "expense" }, select: { id: true, parentId: true } }),
   ]);
   const spentByCategory = new Map(totals.map((t) => [t.categoryId, t.total]));

@@ -84,6 +84,7 @@ Kirim pesan seperti:
 • <code>masuk 12jt gaji bulan November</code>
 • <code>transfer 500rb dari BCA ke GoPay</code>
 • <code>kemarin bensin 50rb gopay</code>
+• <code>setor 2jt ke BRI</code>
 
 Hutang, piutang, investasi:
 • <code>pinjam 2jt dari Budi ke BCA cicilan 500rb tiap tanggal 10</code>
@@ -99,6 +100,7 @@ Atau kirim <b>foto struk</b>.
 • <i>ringkasan bulan lalu</i>
 • <i>hutang ke Budi berapa?</i>
 • <i>sisa anggaran belanja</i>
+• <i>laba usaha bulan ini</i>
 • <i>hapus yang tadi</i> — hapus catatan terakhir dari bot
 
 Nominal bisa ditulis 75rb, 1,5jt, 2 juta, atau Rp 25.000.

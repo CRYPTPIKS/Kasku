@@ -17,6 +17,7 @@ export type Question =
   | { kind: "debts"; direction: "payable" | "receivable"; counterparty: string | null }
   | { kind: "budget"; categoryId: string | null }
   | { kind: "investments" }
+  | { kind: "business"; period: "month" | "last_month" }
   | { kind: "recent" }
   | { kind: "help" };
 
@@ -74,7 +75,7 @@ export function detectQuestion(input: string, ctx: { accounts: ParserAccount[]; 
   // Ada nominal → ini catatan transaksi, bukan pertanyaan.
   if (findAmounts(raw).some((a) => a.value >= 100)) return null;
   const first = t.split(" ")[0] ?? "";
-  if (["beli", "jual", "bayar", "pinjam", "pinjamkan", "transfer", "tf", "masuk", "terima"].includes(first)) return null;
+  if (["beli", "jual", "bayar", "pinjam", "pinjamkan", "transfer", "tf", "masuk", "terima", "setor"].includes(first)) return null;
 
   const asks = raw.includes("?") || QUESTION_WORDS.test(t);
 
@@ -84,6 +85,10 @@ export function detectQuestion(input: string, ctx: { accounts: ParserAccount[]; 
     return { kind: "debts", direction: "receivable", counterparty: /\bpiutang\b/.test(t) ? findCounterparty(raw) : null };
   }
   if (/\b(hutang|utang|cicilan|tagihan cicilan)\b/.test(t)) return { kind: "debts", direction: "payable", counterparty: findCounterparty(raw) };
+
+  if (/\b(laba|untung|rugi|omzet|omset)\b/.test(t) || (/\busaha\b/.test(t) && (asks || t.split(" ").length <= 4))) {
+    return { kind: "business", period: /\bbulan (lalu|kemar[ie]n)\b/.test(t) ? "last_month" : "month" };
+  }
 
   if (/\b(anggaran|budget|bujet)\b/.test(t)) {
     const rest = t.replace(FILLER, " ").trim();

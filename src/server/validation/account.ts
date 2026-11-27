@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { optionalString, signedAmount } from "./common";
 
+/** Kosong = rekening pribadi. `undefined` (tidak dikirim) = tidak diubah. */
+export const businessIdField = z
+  .string()
+  .trim()
+  .nullable()
+  .optional()
+  .transform((v) => (v === undefined ? undefined : v ? v : null));
+
 export const ACCOUNT_KINDS = ["cash", "bank", "ewallet", "credit_card", "deposit", "other"] as const;
 
 export const accountInputSchema = z.object({
@@ -26,5 +34,6 @@ export const accountInputSchema = z.object({
         .slice(0, 10),
     ),
   color: optionalString(20),
+  businessId: businessIdField,
 });
 export type AccountInput = z.input<typeof accountInputSchema>;

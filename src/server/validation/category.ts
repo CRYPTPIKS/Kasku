@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { businessIdField } from "./account";
 import { optionalId, optionalString } from "./common";
 
 export const categoryInputSchema = z.object({
@@ -7,6 +8,7 @@ export const categoryInputSchema = z.object({
   parentId: optionalId,
   icon: optionalString(8),
   color: optionalString(20),
+  businessId: businessIdField,
   keywords: z
     .union([z.array(z.string()), z.string()])
     .optional()

@@ -19,6 +19,12 @@ export async function listCategories(ctx: ServiceContext, opts: { kind?: Categor
   });
 }
 
+async function assertBusiness(ctx: ServiceContext, businessId: string | null | undefined) {
+  if (!businessId) return;
+  const b = await prisma.business.findFirst({ where: { id: businessId, householdId: ctx.householdId } });
+  if (!b) throw notFound("Usaha");
+}
+
 async function validateParent(ctx: ServiceContext, parentId: string | null, kind: CategoryKind, selfId?: string) {
   if (!parentId) return;
   if (parentId === selfId) throw new AppError("Kategori tidak bisa menjadi induk dirinya sendiri.");
@@ -33,7 +39,8 @@ export async function createCategory(ctx: ServiceContext, raw: CategoryInput) {
   const input = categoryInputSchema.parse(raw);
   await validateParent(ctx, input.parentId, input.kind);
   return prisma.$transaction(async (tx) => {
-    const category = await tx.category.create({ data: { householdId: ctx.householdId, ...input } });
+    await assertBusiness(ctx, input.businessId);
+    const category = await tx.category.create({ data: { householdId: ctx.householdId, ...input, businessId: input.businessId ?? null } });
     await writeAudit(tx, ctx, { entityType: "Category", entityId: category.id, action: "create", after: category });
     return category;
   });
@@ -50,6 +57,7 @@ export async function updateCategory(ctx: ServiceContext, id: string, raw: Categ
   }
   await validateParent(ctx, input.parentId, input.kind, id);
   return prisma.$transaction(async (tx) => {
+    await assertBusiness(ctx, input.businessId);
     const category = await tx.category.update({ where: { id }, data: input });
     await writeAudit(tx, ctx, { entityType: "Category", entityId: id, action: "update", before, after: category });
     return category;

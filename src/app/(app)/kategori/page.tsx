@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/server/auth/current";
 import { listCategories } from "@/server/services/categories";
+import { loadBusinesses } from "@/server/services/reports";
 import { CategoryForm } from "@/components/categories/category-form";
 import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = { title: "Kategori" };
 export default async function CategoriesPage({ searchParams }: { searchParams: Promise<{ saved?: string; arsip?: string }> }) {
   const { ctx } = await requireUser();
   const sp = await searchParams;
-  const categories = await listCategories(ctx, { includeArchived: sp.arsip === "1" });
+  const [categories, businesses] = await Promise.all([listCategories(ctx, { includeArchived: sp.arsip === "1" }), loadBusinesses(ctx)]);
   const parents = categories.filter((c) => !c.parentId && !c.isArchived).map((c) => ({ id: c.id, name: c.name, kind: c.kind }));
 
   const section = (kind: "expense" | "income", title: string) => {
@@ -59,7 +60,7 @@ export default async function CategoriesPage({ searchParams }: { searchParams: P
         </div>
         <Card className="h-fit p-4 sm:p-5">
           <h2 className="mb-3 font-semibold">Tambah kategori</h2>
-          <CategoryForm parents={parents} initial={{ name: "", kind: "expense", parentId: "", icon: "", color: "", keywords: "" }} />
+          <CategoryForm parents={parents} businesses={businesses} initial={{ name: "", kind: "expense", parentId: "", icon: "", color: "", keywords: "" }} />
         </Card>
       </div>
     </div>
@@ -70,7 +71,7 @@ function CategoryLink({
   c,
   child,
 }: {
-  c: { id: string; name: string; icon: string | null; color: string | null; isArchived: boolean; _count: { transactions: number } };
+  c: { id: string; name: string; icon: string | null; color: string | null; isArchived: boolean; businessId: string | null; _count: { transactions: number } };
   child?: boolean;
 }) {
   return (
@@ -79,6 +80,7 @@ function CategoryLink({
         {c.icon ?? "•"}
       </span>
       <span className="flex-1 truncate text-sm font-medium">{c.name}</span>
+      {c.businessId && <Badge>Usaha</Badge>}
       {c.isArchived && <Badge>Diarsipkan</Badge>}
       <span className="text-xs text-slate-500">{c._count.transactions} transaksi</span>
     </Link>

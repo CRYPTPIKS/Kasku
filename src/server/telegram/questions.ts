@@ -9,6 +9,7 @@ import { PERIOD_LABELS, type Question, type QuestionPeriod } from "@/lib/parsing
 import { prisma } from "../db";
 import { listAccounts, summarizeBalances } from "../services/accounts";
 import { listBudgetStatus } from "../services/budgets";
+import { businessReport } from "../services/businesses";
 import { findActiveDebtsByCounterparty, nextInstallment } from "../services/debts";
 import { periodTotals, totalsByCategory } from "../services/reports";
 import { listTransactions } from "../services/transactions";
@@ -65,7 +66,7 @@ async function categorySpending(ctx: BotContext, categoryId: string, start: Date
   const [cat, children, cats] = await Promise.all([
     prisma.category.findFirst({ where: { id: categoryId, householdId: svc.householdId } }),
     prisma.category.findMany({ where: { parentId: categoryId, householdId: svc.householdId }, select: { id: true } }),
-    totalsByCategory(svc, "expense", start, end),
+    totalsByCategory(svc, "expense", start, end, { scope: "all" }),
   ]);
   const ids = new Set([categoryId, ...children.map((c) => c.id)]);
   const rows = cats.filter((c) => c.categoryId && ids.has(c.categoryId));
@@ -113,6 +114,27 @@ export async function answerQuestion(ctx: BotContext, q: Exclude<Question, { kin
         return `• Sisa <b>${esc(formatRupiah(Number(d.remainingAmount)))}</b>${due ? `, jatuh tempo ${esc(formatDate(due))}` : ""}`;
       });
       return reply(ctx, `<b>${esc(label[0]!.toUpperCase() + label.slice(1))} ${esc(debts[0]!.counterparty)}</b>\n${lines.join("\n")}`);
+    }
+    case "business": {
+      const m = currentMonthRange();
+      const prev = new Date(Date.UTC(m.year, m.month - 2, 1));
+      const [y, mo] = q.period === "last_month" ? [prev.getUTCFullYear(), prev.getUTCMonth() + 1] : [m.year, m.month];
+      const reports = await businessReport(svc, y, mo, 1);
+      if (reports.length === 0) return reply(ctx, "Belum ada usaha. Buat dulu di dashboard → Usaha.");
+      const blocks = reports.map((r) => {
+        const x = r.months[0]!;
+        return [
+          `<b>${esc(`${r.icon ? `${r.icon} ` : ""}${r.name}`)}</b>`,
+          `Pendapatan: ${esc(formatRupiah(x.income))}`,
+          `Biaya: ${esc(formatRupiah(x.expense))}`,
+          `Laba kira-kira: <b>${esc(formatRupiah(x.profit))}</b>`,
+          x.withdrawn ? `Diambil ke pribadi: ${esc(formatRupiah(x.withdrawn))}` : "",
+          r.accounts.length ? `Saldo rekening usaha: ${esc(formatRupiah(r.balance))}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      });
+      return reply(ctx, `<b>Usaha ${esc(formatMonth(y, mo))}</b>\n\n${blocks.join("\n\n")}`);
     }
     case "budget": {
       if (!q.categoryId) return cmdAnggaran(ctx);

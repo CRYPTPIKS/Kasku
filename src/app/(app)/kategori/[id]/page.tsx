@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/server/auth/current";
 import { categoryUsage, listCategories } from "@/server/services/categories";
+import { loadBusinesses } from "@/server/services/reports";
 import { CategoryForm } from "@/components/categories/category-form";
 import { LinkButton } from "@/components/ui/button";
 import { Card, PageHeader } from "@/components/ui/card";
@@ -16,7 +17,7 @@ export default async function EditCategoryPage({ params }: { params: Promise<{ i
   const all = await listCategories(ctx, { includeArchived: true });
   const c = all.find((x) => x.id === id);
   if (!c) notFound();
-  const usage = await categoryUsage(ctx, id);
+  const [usage, businesses] = await Promise.all([categoryUsage(ctx, id), loadBusinesses(ctx)]);
   const blockReason = usage.transactions
     ? `⚠️ Kategori ini masih dipakai di ${usage.transactions} transaksi. Kalau dihapus, transaksi itu jadi tanpa kategori dan laporan bulan-bulan lalu berubah.\n\nPakai "Arsipkan kategori" supaya hilang dari pilihan tapi riwayatnya tetap aman.`
     : usage.children
@@ -36,6 +37,7 @@ export default async function EditCategoryPage({ params }: { params: Promise<{ i
       <Card className="p-4 sm:p-6">
         <CategoryForm
           parents={parents}
+          businesses={businesses}
           initial={{
             id: c.id,
             name: c.name,
@@ -43,6 +45,7 @@ export default async function EditCategoryPage({ params }: { params: Promise<{ i
             parentId: c.parentId ?? "",
             icon: c.icon ?? "",
             color: c.color ?? "",
+            businessId: c.businessId ?? "",
             keywords: c.keywords.join(", "),
           }}
         />

@@ -13,14 +13,17 @@ export interface CategoryFormValues {
   icon: string;
   color: string;
   keywords: string;
+  businessId?: string;
 }
 
 export function CategoryForm({
   initial,
   parents,
+  businesses = [],
 }: {
   initial: CategoryFormValues;
   parents: { id: string; name: string; kind: "income" | "expense" }[];
+  businesses?: { id: string; name: string; icon: string | null }[];
 }) {
   const [state, action, pending] = useActionState(saveCategoryAction, {});
   const v = state.values;
@@ -84,6 +87,23 @@ export function CategoryForm({
         </label>
         <input id="color" name="color" type="color" className="h-10 w-16 rounded border border-slate-300" defaultValue={v?.color ?? (initial.color || "#10b981")} />
       </div>
+      {businesses.length > 0 && (
+        <div>
+          <label className="label" htmlFor="businessId">
+            Milik usaha
+          </label>
+          <select id="businessId" name="businessId" className="input" defaultValue={v?.businessId ?? initial.businessId ?? ""}>
+            <option value="">— Pribadi —</option>
+            {businesses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.icon ? `${b.icon} ` : ""}
+                {b.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">Pemasukan & pengeluaran kategori usaha dihitung di halaman Usaha; laporan pribadi hanya menampilkan laba bersihnya. Subkategori ikut induknya.</p>
+        </div>
+      )}
       <Button type="submit" disabled={pending}>
         {pending ? "Menyimpan…" : "Simpan kategori"}
       </Button>

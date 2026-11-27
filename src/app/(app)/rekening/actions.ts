@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/current";
 import { formValues, runAction, type ActionState } from "@/server/action-result";
-import { createAccount, setAccountArchived, updateAccount } from "@/server/services/accounts";
+import { createAccount, deleteAccount, setAccountArchived, updateAccount } from "@/server/services/accounts";
 import type { AccountInput } from "@/server/validation/account";
 
 function parseForm(fd: FormData): AccountInput {
@@ -39,6 +39,15 @@ export async function archiveAccountAction(id: string, archived: boolean) {
   const { ctx } = await requireUser();
   const r = await runAction(async () => {
     await setAccountArchived(ctx, id, archived);
+  });
+  revalidatePath("/", "layout");
+  return r;
+}
+
+export async function deleteAccountAction(id: string) {
+  const { ctx } = await requireUser();
+  const r = await runAction(async () => {
+    await deleteAccount(ctx, id);
   });
   revalidatePath("/", "layout");
   return r;

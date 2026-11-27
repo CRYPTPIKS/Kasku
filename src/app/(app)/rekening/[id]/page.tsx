@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { formatNumber } from "@/lib/money";
 import { requireUser } from "@/server/auth/current";
 import { AppError } from "@/server/errors";
-import { getAccount } from "@/server/services/accounts";
+import { accountUsage, getAccount } from "@/server/services/accounts";
 import { listTransactions } from "@/server/services/transactions";
 import { AccountForm } from "@/components/accounts/account-form";
 import { TransactionRow } from "@/components/transactions/transaction-row";
@@ -12,7 +12,7 @@ import { LinkButton } from "@/components/ui/button";
 import { Alert, Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Money } from "@/components/ui/money";
-import { archiveAccountAction } from "../actions";
+import { archiveAccountAction, deleteAccountAction } from "../actions";
 
 export const metadata: Metadata = { title: "Detail rekening" };
 
@@ -30,7 +30,16 @@ export default async function AccountDetailPage({
     if (e instanceof AppError && e.code === "not_found") notFound();
     throw e;
   });
-  const history = await listTransactions(ctx, { accountId: id, page: Number(sp.page ?? 1) || 1, pageSize: 20 });
+  const [history, usage] = await Promise.all([
+    listTransactions(ctx, { accountId: id, page: Number(sp.page ?? 1) || 1, pageSize: 20 }),
+    accountUsage(ctx, id),
+  ]);
+  const used = usage.transactions > 0;
+  const usedParts = [
+    `${usage.transactions} transaksi`,
+    usage.debts ? `${usage.debts} hutang/piutang` : "",
+    usage.investments ? `${usage.investments} transaksi investasi` : "",
+  ].filter(Boolean);
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -100,7 +109,20 @@ export default async function AccountDetailPage({
         </div>
       </details>
 
-      <Card className="p-4">
+      <Card className="flex flex-wrap gap-2 p-4">
+        <ConfirmButton
+          action={deleteAccountAction.bind(null, account.id)}
+          label="Hapus rekening"
+          title={used ? "Rekening ini tidak bisa dihapus" : `Hapus ${account.name}?`}
+          description={
+            used
+              ? `⚠️ Rekening ini masih dipakai di ${usedParts.join(", ")}. Kalau dihapus, riwayat dan saldo (termasuk rekening lain yang terhubung lewat transfer) jadi tidak cocok.\n\nPakai "Arsipkan rekening" supaya rekening hilang dari pilihan tapi riwayatnya tetap aman. Atau hapus dulu transaksinya satu per satu.`
+              : `Rekening ini belum pernah dipakai, jadi akan dihapus permanen.${usage.trashed ? ` ${usage.trashed} transaksi di tempat sampah yang memakai rekening ini ikut dihapus permanen.` : ""}`
+          }
+          confirmLabel="Hapus permanen"
+          blocked={used}
+          redirectTo="/rekening"
+        />
         <ConfirmButton
           action={archiveAccountAction.bind(null, account.id, !account.isArchived)}
           label={account.isArchived ? "Aktifkan kembali" : "Arsipkan rekening"}
@@ -111,7 +133,7 @@ export default async function AccountDetailPage({
               : "Rekening disembunyikan dari pilihan transaksi. Riwayat transaksi tetap tersimpan."
           }
           confirmLabel={account.isArchived ? "Aktifkan" : "Arsipkan"}
-          variant={account.isArchived ? "primary" : "danger"}
+          variant={account.isArchived ? "primary" : "secondary"}
         />
       </Card>
     </div>

@@ -17,6 +17,7 @@ export function ConfirmButton({
   variant = "danger",
   size = "sm",
   redirectTo,
+  blocked = false,
 }: {
   action: () => Promise<unknown>;
   label: string;
@@ -27,6 +28,8 @@ export function ConfirmButton({
   size?: "sm" | "md";
   /** Halaman tujuan setelah berhasil. */
   redirectTo?: string;
+  /** Aksi tidak boleh dijalankan: dialog hanya menampilkan peringatan (description). */
+  blocked?: boolean;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -45,35 +48,39 @@ export function ConfirmButton({
       >
         <div className="p-5">
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-          {description && <p className="mt-2 text-sm text-slate-600">{description}</p>}
+          {description && (
+            <p className={`mt-2 whitespace-pre-line text-sm ${blocked ? "text-amber-700" : "text-slate-600"}`}>{description}</p>
+          )}
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" className={buttonClass("secondary", "md")} onClick={() => dialogRef.current?.close()} disabled={pending}>
-              Batal
+              {blocked ? "Tutup" : "Batal"}
             </button>
-            <button
-              type="button"
-              className={buttonClass(variant === "danger" ? "danger" : "primary", "md")}
-              disabled={pending}
-              onClick={() =>
-                startTransition(async () => {
-                  try {
-                    const res = (await action()) as { error?: string } | undefined;
-                    if (res && typeof res === "object" && "error" in res && res.error) {
-                      setError(res.error);
-                      return;
+            {!blocked && (
+              <button
+                type="button"
+                className={buttonClass(variant === "danger" ? "danger" : "primary", "md")}
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    try {
+                      const res = (await action()) as { error?: string } | undefined;
+                      if (res && typeof res === "object" && "error" in res && res.error) {
+                        setError(res.error);
+                        return;
+                      }
+                      dialogRef.current?.close();
+                      if (redirectTo) router.push(redirectTo);
+                      else router.refresh();
+                    } catch {
+                      setError("Gagal memproses. Coba lagi.");
                     }
-                    dialogRef.current?.close();
-                    if (redirectTo) router.push(redirectTo);
-                    else router.refresh();
-                  } catch {
-                    setError("Gagal memproses. Coba lagi.");
-                  }
-                })
-              }
-            >
-              {pending ? "Memproses…" : confirmLabel}
-            </button>
+                  })
+                }
+              >
+                {pending ? "Memproses…" : confirmLabel}
+              </button>
+            )}
           </div>
         </div>
       </dialog>

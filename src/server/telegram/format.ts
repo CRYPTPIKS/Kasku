@@ -44,8 +44,21 @@ export function draftKeyboard(t: TransactionWithRelations): InlineKeyboard {
   return kb;
 }
 
+/** Tombol "Batalkan" tersedia 10 menit setelah transaksi disimpan. */
+export const UNDO_WINDOW_MS = 10 * 60 * 1000;
+
+export function isUndoable(t: Pick<TransactionWithRelations, "status" | "type" | "updatedAt">, now = Date.now()): boolean {
+  return (
+    t.status === "confirmed" &&
+    ["income", "expense", "transfer"].includes(t.type) &&
+    now - new Date(t.updatedAt).getTime() <= UNDO_WINDOW_MS
+  );
+}
+
 export function savedKeyboard(t: TransactionWithRelations): InlineKeyboard {
-  return new InlineKeyboard().text("Ubah", `tx:edit:${t.id}`).text("🗑 Hapus", `tx:del:${t.id}`);
+  const kb = new InlineKeyboard();
+  if (isUndoable(t)) kb.text("↩️ Batalkan", `tx:undo:${t.id}`).row();
+  return kb.text("Ubah", `tx:edit:${t.id}`).text("🗑 Hapus", `tx:del:${t.id}`);
 }
 
 export function choiceKeyboard(
@@ -80,8 +93,16 @@ Hutang, piutang, investasi:
 • <code>dividen BBCA 150rb ke BCA</code>
 Atau kirim <b>foto struk</b>.
 
+<b>Tanya langsung</b>
+• <i>berapa saldo BCA?</i>
+• <i>pengeluaran makan minggu ini</i>
+• <i>ringkasan bulan lalu</i>
+• <i>hutang ke Budi berapa?</i>
+• <i>sisa anggaran belanja</i>
+• <i>hapus yang tadi</i> — hapus catatan terakhir dari bot
+
 Nominal bisa ditulis 75rb, 1,5jt, 2 juta, atau Rp 25.000.
-Setiap catatan muncul sebagai <b>draf</b>. Tekan <b>Simpan</b> agar masuk ke saldo.
+Setiap catatan muncul sebagai <b>draf</b>. Tekan <b>Simpan</b> agar masuk ke saldo. Salah? Tekan <b>Batalkan</b> (10 menit).
 
 <b>Perintah</b>
 /saldo — saldo semua rekening

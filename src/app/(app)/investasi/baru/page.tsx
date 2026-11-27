@@ -35,12 +35,33 @@ export default async function NewAssetPage() {
               ))}
             </select>
           </div>
+          <fieldset>
+            <legend className="label">Cara mencatat</legend>
+            <div className="space-y-2">
+              <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 p-3 text-sm has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50">
+                <input type="radio" name="valuationMode" value="units" defaultChecked className="mt-0.5" />
+                <span>
+                  <span className="font-medium">Unit × harga</span>
+                  <span className="block text-xs text-slate-500">Saham, emas, kripto, reksa dana yang kamu catat unit &amp; NAB-nya.</span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 p-3 text-sm has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50">
+                <input type="radio" name="valuationMode" value="value" className="mt-0.5" />
+                <span>
+                  <span className="font-medium">Nilai total (robo-advisor)</span>
+                  <span className="block text-xs text-slate-500">
+                    Mis. portofolio robo Bibit. Cukup catat nominal setor/tarik, lalu sesekali isi total nilai yang tampil di aplikasinya.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label" htmlFor="name">
                 Nama
               </label>
-              <input id="name" name="name" className="input" required maxLength={80} placeholder="mis. Bank Central Asia" />
+              <input id="name" name="name" className="input" required maxLength={80} placeholder="mis. Bank Central Asia / Bibit Robo" />
             </div>
             <div>
               <label className="label" htmlFor="symbol">
@@ -61,7 +82,7 @@ export default async function NewAssetPage() {
               <input id="unitsPerLot" name="unitsPerLot" type="number" min={1} className="input" placeholder="100 untuk saham IDX" />
             </div>
           </div>
-          <p className="text-xs text-slate-500">Untuk deposito atau reksa dana yang tidak kamu catat unitnya, cukup isi nominal saat mencatat pembelian.</p>
+          <p className="text-xs text-slate-500">Satuan dan isi per lot hanya dipakai untuk mode unit × harga.</p>
         </ActionForm>
       </Card>
     </div>

@@ -8,6 +8,8 @@ import { formValues, runAction, type ActionState } from "@/server/action-result"
 import { prisma } from "@/server/db";
 import {
   createAsset,
+  deleteAsset,
+  deleteAssetPrice,
   deleteInvestmentTransaction,
   recordInvestmentTransaction,
   setAssetArchived,
@@ -27,6 +29,7 @@ export async function createAssetAction(_prev: ActionState, fd: FormData): Promi
       symbol: str(fd, "symbol"),
       unitLabel: str(fd, "unitLabel"),
       unitsPerLot: str(fd, "unitsPerLot"),
+      valuationMode: str(fd, "valuationMode") === "value" ? "value" : "units",
     });
     id = a.id;
   }, formValues(fd));
@@ -64,7 +67,7 @@ export async function setPriceAction(assetId: string, _prev: ActionState, fd: Fo
   const { ctx } = await requireUser();
   const r = await runAction(async () => {
     await setAssetPrice(ctx, assetId, { price: str(fd, "price") ?? "", asOf: str(fd, "asOf") || undefined });
-    return { ok: true, message: "Harga diperbarui." };
+    return { ok: true, message: str(fd, "mode") === "value" ? "Nilai diperbarui." : "Harga diperbarui." };
   });
   if (!r.error) revalidatePath("/", "layout");
   return r;
@@ -83,6 +86,24 @@ export async function archiveAssetAction(id: string, archived: boolean) {
   const { ctx } = await requireUser();
   const r = await runAction(async () => {
     await setAssetArchived(ctx, id, archived);
+  });
+  revalidatePath("/", "layout");
+  return r;
+}
+
+export async function deletePriceAction(priceId: string) {
+  const { ctx } = await requireUser();
+  const r = await runAction(async () => {
+    await deleteAssetPrice(ctx, priceId);
+  });
+  revalidatePath("/", "layout");
+  return r;
+}
+
+export async function deleteAssetAction(id: string) {
+  const { ctx } = await requireUser();
+  const r = await runAction(async () => {
+    await deleteAsset(ctx, id);
   });
   revalidatePath("/", "layout");
   return r;

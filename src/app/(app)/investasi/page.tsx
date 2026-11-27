@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { formatDate } from "@/lib/dates";
 import { formatPercent } from "@/lib/money";
 import { requireUser } from "@/server/auth/current";
 import { canWrite } from "@/server/context";
@@ -78,7 +79,12 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
                       {i.name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {ASSET_CLASS_LABELS[i.assetClass]} · {fmtUnits(i.units)} {i.unitLabel}
+                      {ASSET_CLASS_LABELS[i.assetClass]} ·{" "}
+                      {i.valuationMode === "value"
+                        ? i.priceAsOf
+                          ? `nilai per ${formatDate(i.priceAsOf)}`
+                          : "nilai belum diperbarui"
+                        : `${fmtUnits(i.units)} ${i.unitLabel}`}
                       {i.isArchived && " · diarsipkan"}
                     </p>
                   </div>

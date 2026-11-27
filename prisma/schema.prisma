@@ -578,27 +578,36 @@ enum InvestmentAssetClass {
 }
 
 model InvestmentAsset {
-  id          String               @id @default(cuid())
-  householdId String
-  assetClass  InvestmentAssetClass
+  id            String                  @id @default(cuid())
+  householdId   String
+  assetClass    InvestmentAssetClass
   // Kode/simbol (mis. BBCA, BTC). Dipakai untuk integrasi harga otomatis.
-  symbol      String?
-  name        String
+  symbol        String?
+  name          String
   // Satuan tampilan: lembar, lot, gram, unit, koin.
-  unitLabel   String               @default("unit")
+  unitLabel     String                  @default("unit")
   // Untuk saham IDX: 1 lot = 100 lembar.
-  unitsPerLot Int?
+  unitsPerLot   Int?
   // Sumber harga: manual | <nama provider> (untuk integrasi otomatis nanti).
-  priceSource String               @default("manual")
-  isArchived  Boolean              @default(false)
-  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
+  priceSource   String                  @default("manual")
+  // units = unit × harga (saham, emas); value = catat nominal setor/tarik + nilai total
+  // sesekali (robo-advisor seperti Bibit, tabungan emas, dsb.). Di mode value,
+  // InvestmentPrice.price menyimpan nilai total aset pada tanggal asOf.
+  valuationMode InvestmentValuationMode @default(units)
+  isArchived    Boolean                 @default(false)
+  createdAt     DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime                @updatedAt @db.Timestamptz(3)
 
   household    Household               @relation(fields: [householdId], references: [id], onDelete: Cascade)
   transactions InvestmentTransaction[]
   prices       InvestmentPrice[]
 
   @@unique([householdId, assetClass, name])
+}
+
+enum InvestmentValuationMode {
+  units
+  value
 }
 
 enum InvestmentTransactionKind {

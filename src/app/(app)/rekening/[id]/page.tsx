@@ -5,6 +5,7 @@ import { formatNumber } from "@/lib/money";
 import { requireUser } from "@/server/auth/current";
 import { AppError } from "@/server/errors";
 import { accountUsage, getAccount } from "@/server/services/accounts";
+import { loadBusinesses } from "@/server/services/reports";
 import { listTransactions } from "@/server/services/transactions";
 import { AccountForm } from "@/components/accounts/account-form";
 import { TransactionRow } from "@/components/transactions/transaction-row";
@@ -34,6 +35,7 @@ export default async function AccountDetailPage({
     listTransactions(ctx, { accountId: id, page: Number(sp.page ?? 1) || 1, pageSize: 20 }),
     accountUsage(ctx, id),
   ]);
+  const businesses = await loadBusinesses(ctx);
   const used = usage.transactions > 0;
   const usedParts = [
     `${usage.transactions} transaksi`,
@@ -95,6 +97,7 @@ export default async function AccountDetailPage({
         <summary className="cursor-pointer px-5 py-3 font-semibold">Ubah rekening</summary>
         <div className="border-t border-slate-100 p-4 sm:p-6">
           <AccountForm
+            businesses={businesses}
             initial={{
               id: account.id,
               name: account.name,
@@ -104,6 +107,7 @@ export default async function AccountDetailPage({
               initialBalance: formatNumber(account.initialBalance),
               creditLimit: account.creditLimit === null ? "" : formatNumber(account.creditLimit),
               aliases: account.aliases.join(", "),
+              businessId: account.businessId ?? "",
             }}
           />
         </div>

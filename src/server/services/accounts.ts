@@ -63,6 +63,7 @@ export interface AccountWithBalance {
   aliases: string[];
   color: string | null;
   isArchived: boolean;
+  businessId: string | null;
   initialBalance: number;
   creditLimit: number | null;
   balance: number;
@@ -89,6 +90,7 @@ export async function listAccounts(ctx: ServiceContext, opts: { includeArchived?
     aliases: a.aliases,
     color: a.color,
     isArchived: a.isArchived,
+    businessId: a.businessId,
     initialBalance: Number(a.initialBalance),
     creditLimit: a.creditLimit === null ? null : Number(a.creditLimit),
     balance: Math.round((Number(a.initialBalance) + (movements.get(a.id) ?? 0)) * 100) / 100,
@@ -126,11 +128,18 @@ async function assertUniqueAliases(ctx: ServiceContext, aliases: string[], excep
   if (clash) throw new AppError(`Alias sudah dipakai rekening "${clash.name}".`, "conflict");
 }
 
+async function assertBusiness(ctx: ServiceContext, businessId: string | null | undefined) {
+  if (!businessId) return;
+  const b = await prisma.business.findFirst({ where: { id: businessId, householdId: ctx.householdId } });
+  if (!b) throw notFound("Usaha");
+}
+
 export async function createAccount(ctx: ServiceContext, raw: AccountInput) {
   if (!canWrite(ctx)) throw new AppError("Anda tidak punya akses mengubah data.", "forbidden");
   const input = accountInputSchema.parse(raw);
   await ensureAccountTypes(ctx.householdId);
   await assertUniqueAliases(ctx, input.aliases);
+  await assertBusiness(ctx, input.businessId);
   return prisma.$transaction(async (tx) => {
     const type = await tx.accountType.findUniqueOrThrow({
       where: { householdId_kind: { householdId: ctx.householdId, kind: input.kind } },
@@ -146,6 +155,7 @@ export async function createAccount(ctx: ServiceContext, raw: AccountInput) {
         creditLimit: input.creditLimit ?? null,
         aliases: input.aliases,
         color: input.color,
+        businessId: input.businessId ?? null,
       },
     });
     await writeAudit(tx, ctx, { entityType: "Account", entityId: account.id, action: "create", after: account });
@@ -160,6 +170,7 @@ export async function updateAccount(ctx: ServiceContext, id: string, raw: Accoun
   if (!before) throw notFound("Rekening");
   await ensureAccountTypes(ctx.householdId);
   await assertUniqueAliases(ctx, input.aliases, id);
+  await assertBusiness(ctx, input.businessId);
   return prisma.$transaction(async (tx) => {
     const type = await tx.accountType.findUniqueOrThrow({
       where: { householdId_kind: { householdId: ctx.householdId, kind: input.kind } },
@@ -175,6 +186,7 @@ export async function updateAccount(ctx: ServiceContext, id: string, raw: Accoun
         creditLimit: input.creditLimit ?? null,
         aliases: input.aliases,
         color: input.color,
+        ...(input.businessId !== undefined ? { businessId: input.businessId } : {}),
       },
     });
     await writeAudit(tx, ctx, { entityType: "Account", entityId: id, action: "update", before, after: account });

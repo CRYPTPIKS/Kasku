@@ -16,6 +16,7 @@ function parseForm(fd: FormData): CategoryInput {
     icon: s("icon"),
     color: s("color"),
     keywords: s("keywords"),
+    businessId: fd.has("businessId") ? (s("businessId") ?? "") : undefined,
   };
 }
 

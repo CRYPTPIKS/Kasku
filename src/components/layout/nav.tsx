@@ -13,6 +13,7 @@ export const NAV_ITEMS = [
   { href: "/hutang", label: "Hutang & Piutang", icon: "🤝" },
   { href: "/investasi", label: "Investasi", icon: "📈" },
   { href: "/laporan", label: "Laporan", icon: "📊" },
+  { href: "/usaha", label: "Usaha", icon: "🏪" },
   { href: "/pengaturan", label: "Pengaturan", icon: "⚙️" },
 ] as const;
 

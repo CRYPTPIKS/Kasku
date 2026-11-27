@@ -44,6 +44,8 @@ describe("detectQuestion", () => {
     expect(q("sisa anggaran belanja")).toMatchObject({ kind: "budget", categoryId: "groc" });
     expect(q("investasi gua gimana?")).toMatchObject({ kind: "investments" });
     expect(q("bantuan")).toMatchObject({ kind: "help" });
+    expect(q("laba usaha bulan ini?")).toEqual({ kind: "business", period: "month" });
+    expect(q("untung bulan lalu berapa")).toEqual({ kind: "business", period: "last_month" });
   });
 
   it("undo", () => {
@@ -53,7 +55,7 @@ describe("detectQuestion", () => {
   });
 
   it("pesan transaksi tidak dianggap pertanyaan", () => {
-    for (const s of ["keluar 75rb makan siang pakai cash", "makan 50rb", "bayar hutang 500rb ke Budi", "masuk 12jt gaji", "transfer 500rb dari BCA ke DANA", "beli BBCA 2 lot @9500"]) {
+    for (const s of ["keluar 75rb makan siang pakai cash", "makan 50rb", "bayar hutang 500rb ke Budi", "masuk 12jt gaji", "transfer 500rb dari BCA ke DANA", "setor 2jt ke BCA", "beli BBCA 2 lot @9500"]) {
       expect(q(s), s).toBeNull();
     }
   });

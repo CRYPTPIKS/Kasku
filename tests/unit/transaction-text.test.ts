@@ -159,3 +159,9 @@ describe("variasi", () => {
     expect(parse("keluar 25rb di 7 eleven").amount).toBe(25_000);
   });
 });
+
+describe("setor tunai", () => {
+  it("setor 2jt ke BCA → pemasukan ke BCA", () => {
+    expect(parse("setor 2jt ke BCA")).toMatchObject({ intent: "income", amount: 2_000_000, toAccountId: "bca" });
+  });
+});

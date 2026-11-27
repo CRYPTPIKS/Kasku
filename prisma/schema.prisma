@@ -49,6 +49,7 @@ model Household {
   notifications         Notification[]
   auditLogs             AuditLog[]
   categoryMerchantRules CategoryMerchantRule[]
+  businesses            Business[]
 }
 
 model User {
@@ -201,6 +202,8 @@ model Account {
   // Untuk kartu kredit: limit kredit.
   creditLimit        Decimal? @db.Decimal(18, 2)
   color              String?
+  // Rekening milik usaha: isinya tidak masuk laporan pribadi.
+  businessId         String?
   isArchived         Boolean  @default(false)
   sortOrder          Int      @default(0)
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
@@ -208,12 +211,31 @@ model Account {
 
   household   Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
   accountType AccountType   @relation(fields: [accountTypeId], references: [id])
+  business    Business?     @relation(fields: [businessId], references: [id], onDelete: SetNull)
   outgoing    Transaction[] @relation("TransactionFromAccount")
   incoming    Transaction[] @relation("TransactionToAccount")
   entries     LedgerEntry[]
 
   @@unique([householdId, name])
   @@index([householdId, isArchived])
+}
+
+// Unit usaha (mis. "Usaha Gas", "Konten & Kerja"). Transaksi di rekening atau
+// kategori usaha dipisah dari laporan pribadi; yang masuk ke laporan pribadi
+// hanya uang yang berpindah antara usaha dan rekening pribadi.
+model Business {
+  id          String   @id @default(cuid())
+  householdId String
+  name        String
+  icon        String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  household  Household  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  accounts   Account[]
+  categories Category[]
+
+  @@unique([householdId, name])
 }
 
 enum CategoryKind {
@@ -231,12 +253,15 @@ model Category {
   color       String?
   // Kata kunci untuk saran kategori otomatis (parser teks & struk).
   keywords    String[]     @default([])
+  // Kategori milik usaha (subkategori ikut induknya bila kosong).
+  businessId  String?
   isArchived  Boolean      @default(false)
   sortOrder   Int          @default(0)
   createdAt   DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
 
   household     Household              @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  business      Business?              @relation(fields: [businessId], references: [id], onDelete: SetNull)
   parent        Category?              @relation("CategoryTree", fields: [parentId], references: [id])
   children      Category[]             @relation("CategoryTree")
   transactions  Transaction[]

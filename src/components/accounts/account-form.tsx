@@ -23,9 +23,10 @@ export interface AccountFormValues {
   initialBalance: string;
   creditLimit: string;
   aliases: string;
+  businessId?: string;
 }
 
-export function AccountForm({ initial }: { initial: AccountFormValues }) {
+export function AccountForm({ initial, businesses = [] }: { initial: AccountFormValues; businesses?: { id: string; name: string; icon: string | null }[] }) {
   const [state, action, pending] = useActionState(saveAccountAction, {});
   const v = state.values;
   const [kind, setKind] = useState(v?.kind ?? initial.kind);
@@ -102,6 +103,23 @@ export function AccountForm({ initial }: { initial: AccountFormValues }) {
         <p className="mt-1 text-xs text-slate-500">Pisahkan dengan koma. Dipakai saat kamu menulis “dari BCA” di Telegram.</p>
         {fe.aliases && <p className="mt-1 text-sm text-red-600">{fe.aliases}</p>}
       </div>
+      {businesses.length > 0 && (
+        <div>
+          <label className="label" htmlFor="businessId">
+            Milik usaha
+          </label>
+          <select id="businessId" name="businessId" className="input" defaultValue={v?.businessId ?? initial.businessId ?? ""}>
+            <option value="">— Pribadi —</option>
+            {businesses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.icon ? `${b.icon} ` : ""}
+                {b.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">Transaksi di rekening usaha tidak masuk laporan pribadi. Transfer ke rekening pribadi dihitung sebagai penghasilan usaha.</p>
+        </div>
+      )}
       <Button type="submit" disabled={pending}>
         {pending ? "Menyimpan…" : "Simpan rekening"}
       </Button>

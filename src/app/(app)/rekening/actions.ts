@@ -18,6 +18,7 @@ function parseForm(fd: FormData): AccountInput {
     creditLimit: s("creditLimit") || null,
     aliases: s("aliases"),
     color: s("color"),
+    businessId: fd.has("businessId") ? (s("businessId") ?? "") : undefined,
   };
 }
 

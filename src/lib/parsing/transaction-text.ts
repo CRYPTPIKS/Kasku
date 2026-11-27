@@ -131,7 +131,7 @@ function detectIntent(t: string): { intent: ParsedIntent | null; debtDirection: 
   if (/^(transfer|tf|trf|pindah|pindahkan|mutasi|topup|top up|isi saldo|isi)\b/.test(t)) return { intent: "transfer", debtDirection: null };
 
   // Pemasukan
-  if (/^(masuk|terima|dapat|dapet|pemasukan|income|gaji|gajian|bonus|thr|cashback|refund)\b/.test(t)) return { intent: "income", debtDirection: null };
+  if (/^(masuk|terima|dapat|dapet|pemasukan|income|gaji|gajian|bonus|thr|cashback|refund|setor|setoran|nyetor)\b/.test(t)) return { intent: "income", debtDirection: null };
 
   // Pengeluaran
   if (/^(keluar|bayar|beli|belanja|jajan|pengeluaran|expense|makan|ngopi|isi bensin|bensin)\b/.test(t)) return { intent: "expense", debtDirection: null };
@@ -234,7 +234,7 @@ function detectDate(t: string, now: Date): Date {
 // ---------------------------------------------------------------------------
 
 const INTENT_WORDS =
-  /^(keluar|bayar|beli|belanja|jajan|pengeluaran|expense|masuk|terima|dapat|dapet|pemasukan|income|transfer|tf|trf|pindah|pindahkan|mutasi|topup|top up|isi saldo|piutang|hutang|utang|pinjamkan|pinjemin|minjemin|pinjam|minjam|ngutang|jual)\s+/i;
+  /^(keluar|bayar|beli|belanja|jajan|pengeluaran|expense|masuk|terima|dapat|dapet|pemasukan|income|setor|setoran|nyetor|transfer|tf|trf|pindah|pindahkan|mutasi|topup|top up|isi saldo|piutang|hutang|utang|pinjamkan|pinjemin|minjemin|pinjam|minjam|ngutang|jual)\s+/i;
 
 const FILLER = /\b(sebesar|senilai|seharga|total|sejumlah|rp|untuk|buat|kemarin lusa|kemarin|tadi|hari ini)\b/gi;
 

@@ -93,7 +93,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <Card>
-        <CardHeader title="Arus kas bulanan" subtitle="Transfer antar-rekening tidak dihitung" />
+        <CardHeader title="Arus kas bulanan" subtitle="Pribadi saja. Transfer antar-rekening tidak dihitung; usaha dipisah di halaman Usaha." />
         {totals.income === 0 && totals.expense === 0 ? (
           <EmptyState icon="📊" title="Belum ada data di rentang ini" description="Coba pilih rentang tanggal lain." />
         ) : (

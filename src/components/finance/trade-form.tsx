@@ -11,6 +11,7 @@ export function TradeForm({
   unitsPerLot,
   today,
   nominalMode,
+  tradeLabels = { buy: "Beli", sell: "Jual" },
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   accounts: { id: string; name: string }[];
@@ -19,6 +20,8 @@ export function TradeForm({
   today: string;
   /** Aset tanpa unit (deposito dsb.): cukup isi nominal. */
   nominalMode: boolean;
+  /** Label beli/jual, mis. Setor/Tarik untuk robo-advisor. */
+  tradeLabels?: { buy: string; sell: string };
 }) {
   const [kind, setKind] = useState<"buy" | "sell" | "dividend" | "interest">("buy");
   const trade = kind === "buy" || kind === "sell";
@@ -27,8 +30,8 @@ export function TradeForm({
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-medium sm:grid-cols-4" role="radiogroup" aria-label="Jenis">
         {(
           [
-            ["buy", "Beli"],
-            ["sell", "Jual"],
+            ["buy", tradeLabels.buy],
+            ["sell", tradeLabels.sell],
             ["dividend", "Dividen"],
             ["interest", "Bunga/kupon"],
           ] as const

@@ -14,7 +14,7 @@ import { Badge, Card, CardHeader, PageHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Money } from "@/components/ui/money";
 import { Stat } from "@/components/ui/stat";
-import { archiveAssetAction, deleteTradeAction, recordTradeAction, setPriceAction } from "../actions";
+import { archiveAssetAction, deleteAssetAction, deletePriceAction, deleteTradeAction, recordTradeAction, setPriceAction } from "../actions";
 
 export const metadata: Metadata = { title: "Detail aset" };
 
@@ -27,13 +27,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   });
   const accounts = await listAccounts(ctx);
   const writable = canWrite(ctx);
-  const nominalMode = asset.assetClass === "deposit";
+  const valueMode = asset.valuationMode === "value";
+  const nominalMode = valueMode || asset.assetClass === "deposit";
+  const labels = valueMode ? { buy: "Setor", sell: "Tarik" } : { buy: "Beli", sell: "Jual" };
+  const kindLabel = (k: keyof typeof INVESTMENT_KIND_LABELS) => (k === "buy" || k === "sell" ? labels[k] : INVESTMENT_KIND_LABELS[k]);
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <PageHeader
         title={asset.symbol ? `${asset.symbol} · ${asset.name}` : asset.name}
-        description={`${ASSET_CLASS_LABELS[asset.assetClass]}${asset.isArchived ? " · diarsipkan" : ""}`}
+        description={`${ASSET_CLASS_LABELS[asset.assetClass]}${valueMode ? " · nilai total" : ""}${asset.isArchived ? " · diarsipkan" : ""}`}
         actions={
           <Link href="/investasi" className="text-sm font-medium text-brand-700">
             ← Portofolio
@@ -43,9 +46,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
       <Card className="p-4 sm:p-5">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat large={false} label="Dimiliki" value={`${fmtUnits(s.units)} ${asset.unitLabel}`} hint={asset.unitsPerLot && s.units ? `${fmtUnits(s.units / asset.unitsPerLot)} lot` : undefined} />
+          {!valueMode && (
+            <Stat large={false} label="Dimiliki" value={`${fmtUnits(s.units)} ${asset.unitLabel}`} hint={asset.unitsPerLot && s.units ? `${fmtUnits(s.units / asset.unitsPerLot)} lot` : undefined} />
+          )}
           <Stat large={false} label="Nilai saat ini" value={<Money value={s.marketValue} />} />
-          <Stat large={false} label="Modal" value={<Money value={s.costBasis} />} hint={s.units ? `rata-rata ${formatNumber(s.avgCost)}/${asset.unitLabel}` : undefined} />
+          <Stat
+            large={false}
+            label={valueMode ? "Modal (setoran bersih)" : "Modal"}
+            value={<Money value={s.costBasis} />}
+            hint={!valueMode && s.units ? `rata-rata ${formatNumber(s.avgCost)}/${asset.unitLabel}` : undefined}
+          />
           <Stat
             label="Belum terealisasi"
             value={<Money value={s.unrealized} signed tone={s.unrealized >= 0 ? "income" : "expense"} />}
@@ -55,7 +65,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           <Stat large={false} label="Dividen/bunga" value={<Money value={s.income} tone="income" />} />
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          {s.price !== null
+          {valueMode
+            ? s.priceAsOf
+              ? `Nilai terakhir dicatat ${formatDate(s.priceAsOf)}, ditambah setoran/penarikan sesudahnya.`
+              : "Nilai belum pernah diperbarui, jadi masih sama dengan total setoran."
+            : s.price !== null
             ? `Harga ${formatNumber(s.price)}/${asset.unitLabel} (${s.priceSource === "manual" ? "diperbarui manual" : "dari transaksi terakhir"}, ${formatDate(s.priceAsOf!)})`
             : "Belum ada harga."}
         </p>
@@ -71,7 +85,35 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             unitsPerLot={asset.unitsPerLot}
             today={toDateInput(new Date())}
             nominalMode={nominalMode}
+            tradeLabels={labels}
           />
+        </Card>
+      )}
+
+      {writable && valueMode && (
+        <Card className="p-4 sm:p-5">
+          <h2 className="mb-1 font-semibold">Perbarui nilai</h2>
+          <p className="mb-3 text-xs text-slate-500">Isi total nilai yang tampil di aplikasinya (mis. Bibit), untuk menghitung untung/rugi.</p>
+          <ActionForm action={setPriceAction.bind(null, asset.id)} submitLabel="Simpan nilai" submitSize="sm" submitVariant="secondary" resetOnSuccess className="space-y-2">
+            <input type="hidden" name="mode" value="value" />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <input name="price" className="input" inputMode="decimal" placeholder="Total nilai, mis. 10,5jt" aria-label="Total nilai" required />
+              <input name="asOf" type="date" className="input" defaultValue={toDateInput(new Date())} aria-label="Tanggal nilai" />
+            </div>
+          </ActionForm>
+          {asset.prices.length > 0 && (
+            <ul className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
+              {asset.prices.map((pr) => (
+                <li key={pr.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="text-slate-600">{formatDate(pr.asOf)}</span>
+                  <span className="flex items-center gap-2">
+                    <Money value={Number(pr.price)} />
+                    <ConfirmButton action={deletePriceAction.bind(null, pr.id)} label="Hapus" title="Hapus catatan nilai ini?" confirmLabel="Hapus" variant="ghost" />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
@@ -101,7 +143,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 <li key={t.id} className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
                   <div className="min-w-0">
                     <p className="text-sm font-medium">
-                      <Badge tone={t.kind === "buy" ? "blue" : t.kind === "sell" ? "amber" : "green"}>{INVESTMENT_KIND_LABELS[t.kind]}</Badge>{" "}
+                      <Badge tone={t.kind === "buy" ? "blue" : t.kind === "sell" ? "amber" : "green"}>{kindLabel(t.kind)}</Badge>{" "}
                       {trade && !nominalMode && (
                         <span className="text-slate-600">
                           {fmtUnits(Number(t.units))} {asset.unitLabel} @ {formatNumber(Number(t.pricePerUnit))}
@@ -135,12 +177,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       </Card>
 
       {writable && (
-        <div>
+        <div className="flex flex-wrap gap-2">
+          <ConfirmButton
+            action={deleteAssetAction.bind(null, asset.id)}
+            label="Hapus aset"
+            title={`Hapus ${asset.name}?`}
+            description="Semua riwayat dan nilai aset ini dihapus. Transaksi kas terkait (mis. pembelian dari BCA) ikut dihapus, jadi saldo rekening kembali seperti sebelum dicatat."
+            confirmLabel="Hapus aset"
+            redirectTo="/investasi"
+          />
           <ConfirmButton
             action={archiveAssetAction.bind(null, asset.id, !asset.isArchived)}
             label={asset.isArchived ? "Aktifkan lagi" : "Arsipkan aset"}
             title={asset.isArchived ? "Aktifkan aset ini lagi?" : "Arsipkan aset ini?"}
-            description={asset.isArchived ? undefined : "Hanya bisa jika unit sudah habis dijual. Riwayat tetap tersimpan."}
+            description={asset.isArchived ? undefined : valueMode ? "Hanya bisa jika nilainya sudah nol (semua ditarik). Riwayat tetap tersimpan." : "Hanya bisa jika unit sudah habis dijual. Riwayat tetap tersimpan."}
             confirmLabel={asset.isArchived ? "Aktifkan" : "Arsipkan"}
             variant="secondary"
           />

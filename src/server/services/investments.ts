@@ -1,5 +1,6 @@
-import type { InvestmentAssetClass, Prisma } from "@prisma/client";
-import { computeHolding, tradeTotal, valuate, type InvestmentTrade } from "@/lib/investments";
+import type { InvestmentAssetClass, InvestmentValuationMode, Prisma } from "@prisma/client";
+import { computeHolding, computeValueHolding, tradeTotal, valuate, type Holding, type InvestmentTrade } from "@/lib/investments";
+import { formatRupiah } from "@/lib/money";
 import { prisma, type Tx } from "../db";
 import { AppError, notFound } from "../errors";
 import { canWrite, type ServiceContext } from "../context";
@@ -53,6 +54,20 @@ async function loadTrades(db: Tx | typeof prisma, assetId: string) {
   return rows.map(toTrade);
 }
 
+type PriceRow = { price: Prisma.Decimal; asOf: Date };
+
+/** Kepemilikan sesuai mode aset. Melempar Error bila jual/tarik melebihi kepemilikan. */
+function holdingFor(mode: InvestmentValuationMode, trades: InvestmentTrade[], prices: PriceRow[]): Holding & { marketValue?: number; lastValueAt?: Date | null } {
+  if (mode === "value") return computeValueHolding(trades, prices.map((p) => ({ asOf: p.asOf, value: Number(p.price) })));
+  return computeHolding(trades);
+}
+
+async function loadHolding(db: Tx | typeof prisma, asset: { id: string; valuationMode: InvestmentValuationMode }) {
+  const trades = await loadTrades(db, asset.id);
+  const prices = asset.valuationMode === "value" ? await db.investmentPrice.findMany({ where: { assetId: asset.id }, orderBy: { asOf: "asc" } }) : [];
+  return holdingFor(asset.valuationMode, trades, prices);
+}
+
 // ---------------------------------------------------------------------------
 // Aset
 // ---------------------------------------------------------------------------
@@ -71,7 +86,8 @@ export async function createAsset(ctx: ServiceContext, raw: AssetInput, db: Tx |
       name: input.name,
       symbol: input.symbol,
       unitLabel: input.unitLabel,
-      unitsPerLot: input.unitsPerLot ?? (input.assetClass === "stock" ? 100 : null),
+      unitsPerLot: input.valuationMode === "value" ? null : (input.unitsPerLot ?? (input.assetClass === "stock" ? 100 : null)),
+      valuationMode: input.valuationMode,
     },
   });
   await writeAudit(db as Tx, ctx, { entityType: "InvestmentAsset", entityId: asset.id, action: "create", after: asset });
@@ -98,10 +114,36 @@ export async function setAssetArchived(ctx: ServiceContext, id: string, archived
   const asset = await prisma.investmentAsset.findFirst({ where: { id, householdId: ctx.householdId } });
   if (!asset) throw notFound("Aset");
   if (archived) {
-    const h = computeHolding(await loadTrades(prisma, id));
-    if (h.units > 0) throw new AppError("Aset masih punya unit. Catat penjualannya dulu sebelum diarsipkan.");
+    const h = await loadHolding(prisma, asset);
+    if (h.units > 0) {
+      throw new AppError(
+        asset.valuationMode === "value"
+          ? "Nilai aset belum nol. Catat penarikannya dulu sebelum diarsipkan, atau hapus asetnya."
+          : "Aset masih punya unit. Catat penjualannya dulu sebelum diarsipkan.",
+      );
+    }
   }
   return prisma.investmentAsset.update({ where: { id }, data: { isArchived: archived } });
+}
+
+/**
+ * Hapus aset beserta riwayat dan harganya. Transaksi kas terkait ikut dihapus
+ * (soft delete), sehingga saldo rekening kembali seperti sebelum dicatat.
+ */
+export async function deleteAsset(ctx: ServiceContext, id: string) {
+  assertWrite(ctx);
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.investmentAsset.findFirst({ where: { id, householdId: ctx.householdId }, include: { transactions: true } });
+    if (!before) throw notFound("Aset");
+    const cashIds = before.transactions.map((t) => t.transactionId).filter((x): x is string => !!x);
+    if (cashIds.length) {
+      await tx.transaction.updateMany({ where: { id: { in: cashIds }, deletedAt: null }, data: { deletedAt: new Date(), deletedById: ctx.userId } });
+    }
+    await tx.investmentAsset.delete({ where: { id } });
+    const { transactions, ...asset } = before;
+    await writeAudit(tx, ctx, { entityType: "InvestmentAsset", entityId: id, action: "delete", before: { ...asset, trades: transactions.length, cashTransactions: cashIds } });
+    return { deletedCashTransactions: cashIds.length };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +166,12 @@ export async function recordInvestmentTransaction(ctx: ServiceContext, assetId: 
     let price = 0;
     let total: number;
     if (input.kind === "buy" || input.kind === "sell") {
-      if (input.units && input.units > 0) {
+      if (asset.valuationMode === "value") {
+        // Mode nilai: hanya nominal setor/tarik yang dicatat.
+        if (!input.totalAmount) throw new AppError("Isi nominal.", "validation", { totalAmount: "Isi nominal" });
+        units = input.totalAmount;
+        price = 1;
+      } else if (input.units && input.units > 0) {
         units = input.units;
         price = input.pricePerUnit && input.pricePerUnit > 0 ? input.pricePerUnit : (input.totalAmount! + (input.kind === "buy" ? -input.fee : input.fee)) / units;
       } else {
@@ -139,8 +186,14 @@ export async function recordInvestmentTransaction(ctx: ServiceContext, assetId: 
     }
 
     if (input.kind === "sell") {
-      const held = computeHolding(await loadTrades(tx, assetId)).units;
-      if (units > held + 1e-9) {
+      const held = (await loadHolding(tx, asset)).units;
+      if (asset.valuationMode === "value") {
+        if (total > held + 0.005) {
+          throw new AppError(`Penarikan (${formatRupiah(total)}) melebihi nilai aset (${formatRupiah(held)}). Perbarui nilainya dulu kalau sudah naik.`, "validation", {
+            totalAmount: "Melebihi nilai aset",
+          });
+        }
+      } else if (units > held + 1e-9) {
         throw new AppError(`Unit yang dijual (${fmtUnits(units)}) melebihi yang dimiliki (${fmtUnits(held)}).`, "validation", { units: "Melebihi kepemilikan" });
       }
     }
@@ -148,7 +201,10 @@ export async function recordInvestmentTransaction(ctx: ServiceContext, assetId: 
     let transactionId: string | null = null;
     if (input.accountId) {
       const type = input.kind === "buy" ? "investment_buy" : input.kind === "sell" ? "investment_sell" : "investment_income";
-      const verb = { buy: "Beli", sell: "Jual", dividend: "Dividen", interest: "Bunga" }[input.kind];
+      const verb =
+        asset.valuationMode === "value"
+          ? { buy: "Setor", sell: "Tarik", dividend: "Dividen", interest: "Bunga" }[input.kind]
+          : { buy: "Beli", sell: "Jual", dividend: "Dividen", interest: "Bunga" }[input.kind];
       const t = await createTransaction(
         ctx,
         {
@@ -188,13 +244,17 @@ export async function recordInvestmentTransaction(ctx: ServiceContext, assetId: 
 export async function deleteInvestmentTransaction(ctx: ServiceContext, id: string) {
   assertWrite(ctx);
   return prisma.$transaction(async (tx) => {
-    const before = await tx.investmentTransaction.findFirst({ where: { id, asset: { householdId: ctx.householdId } } });
+    const before = await tx.investmentTransaction.findFirst({ where: { id, asset: { householdId: ctx.householdId } }, include: { asset: true } });
     if (!before) throw notFound("Transaksi investasi");
     await tx.investmentTransaction.delete({ where: { id } });
     try {
-      computeHolding(await loadTrades(tx, before.assetId));
+      await loadHolding(tx, before.asset);
     } catch {
-      throw new AppError("Tidak bisa dihapus: unit yang sudah dijual akan melebihi unit yang dimiliki. Hapus penjualannya dulu.");
+      throw new AppError(
+        before.asset.valuationMode === "value"
+          ? "Tidak bisa dihapus: penarikan sesudahnya akan melebihi nilai aset. Hapus penarikannya dulu."
+          : "Tidak bisa dihapus: unit yang sudah dijual akan melebihi unit yang dimiliki. Hapus penjualannya dulu.",
+      );
     }
     if (before.transactionId) {
       await tx.transaction.updateMany({
@@ -211,7 +271,43 @@ export async function setAssetPrice(ctx: ServiceContext, assetId: string, raw: P
   const input = priceInputSchema.parse(raw);
   const asset = await prisma.investmentAsset.findFirst({ where: { id: assetId, householdId: ctx.householdId } });
   if (!asset) throw notFound("Aset");
-  return prisma.investmentPrice.create({ data: { assetId, price: input.price, asOf: input.asOf ?? new Date(), source: "manual" } });
+  const asOf = input.asOf ?? new Date();
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.investmentPrice.create({ data: { assetId, price: input.price, asOf, source: "manual" } });
+    if (asset.valuationMode === "value") {
+      try {
+        await loadHolding(tx, asset);
+      } catch {
+        throw new AppError("Nilai ini lebih kecil dari penarikan yang tercatat sesudah tanggal tersebut. Periksa tanggal atau nominalnya.", "validation", {
+          price: "Tidak cocok dengan penarikan sesudahnya",
+        });
+      }
+    }
+    await writeAudit(tx, ctx, {
+      entityType: "InvestmentAsset",
+      entityId: assetId,
+      action: "update",
+      after: { [asset.valuationMode === "value" ? "value" : "price"]: input.price, asOf },
+    });
+    return row;
+  });
+}
+
+/** Hapus satu catatan harga/nilai (mis. salah ketik). */
+export async function deleteAssetPrice(ctx: ServiceContext, priceId: string) {
+  assertWrite(ctx);
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.investmentPrice.findFirst({ where: { id: priceId, asset: { householdId: ctx.householdId } }, include: { asset: true } });
+    if (!before) throw notFound("Catatan nilai");
+    await tx.investmentPrice.delete({ where: { id: priceId } });
+    try {
+      await loadHolding(tx, before.asset);
+    } catch {
+      throw new AppError("Tidak bisa dihapus: penarikan sesudahnya akan melebihi nilai aset. Hapus penarikannya dulu.");
+    }
+    const { asset, ...row } = before;
+    await writeAudit(tx, ctx, { entityType: "InvestmentAsset", entityId: asset.id, action: "update", before: { deletedPrice: row } });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +325,9 @@ export interface PortfolioItem {
   assetClass: InvestmentAssetClass;
   unitLabel: string;
   unitsPerLot: number | null;
+  valuationMode: InvestmentValuationMode;
   isArchived: boolean;
+  /** Mode value: sama dengan nilai saat ini (Rp). */
   units: number;
   costBasis: number;
   avgCost: number;
@@ -248,12 +346,38 @@ export async function getPortfolio(ctx: ServiceContext, opts: { includeArchived?
     where: { householdId: ctx.householdId, ...(opts.includeArchived ? {} : { isArchived: false }) },
     include: {
       transactions: { where: countedTrades, orderBy: { occurredAt: "asc" } },
-      prices: { orderBy: { asOf: "desc" }, take: 1 },
+      prices: { orderBy: { asOf: "desc" } },
     },
     orderBy: [{ assetClass: "asc" }, { name: "asc" }],
   });
   const items: PortfolioItem[] = assets.map((a) => {
-    const h = computeHolding(a.transactions.map(toTrade));
+    const trades = a.transactions.map(toTrade);
+    if (a.valuationMode === "value") {
+      const h = computeValueHolding(trades, a.prices.map((p) => ({ asOf: p.asOf, value: Number(p.price) })));
+      const unrealized = Math.round((h.marketValue - h.costBasis) * 100) / 100;
+      return {
+        id: a.id,
+        name: a.name,
+        symbol: a.symbol,
+        assetClass: a.assetClass,
+        unitLabel: a.unitLabel,
+        unitsPerLot: null,
+        valuationMode: a.valuationMode,
+        isArchived: a.isArchived,
+        units: h.units,
+        costBasis: h.costBasis,
+        avgCost: h.avgCost,
+        realized: h.realized,
+        income: h.income,
+        price: null,
+        priceAsOf: h.lastValueAt,
+        priceSource: h.lastValueAt ? "manual" : null,
+        marketValue: h.marketValue,
+        unrealized,
+        unrealizedPct: h.costBasis > 0 ? unrealized / h.costBasis : 0,
+      };
+    }
+    const h = computeHolding(trades);
     const manual = a.prices[0];
     // Harga terbaru: pembaruan manual atau harga transaksi terakhir, mana yang lebih baru.
     const useManual = manual && (!h.lastTradeAt || manual.asOf >= h.lastTradeAt);
@@ -266,6 +390,7 @@ export async function getPortfolio(ctx: ServiceContext, opts: { includeArchived?
       assetClass: a.assetClass,
       unitLabel: a.unitLabel,
       unitsPerLot: a.unitsPerLot,
+      valuationMode: a.valuationMode,
       isArchived: a.isArchived,
       units: h.units,
       costBasis: h.costBasis,

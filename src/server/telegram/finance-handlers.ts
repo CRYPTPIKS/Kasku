@@ -80,7 +80,8 @@ export async function cmdInvestasi(ctx: BotContext) {
   if (held.length === 0) return ctx.reply("Belum ada investasi. Coba: <code>beli BBCA 2 lot @9500 dari BCA</code>", HTML);
   const lines = held.map((i) => {
     const sign = i.unrealized >= 0 ? "+" : "−";
-    return `• ${esc(i.symbol ?? i.name)}: ${esc(formatRupiah(i.marketValue))} (${sign}${esc(formatRupiah(Math.abs(i.unrealized)))}) · ${esc(fmtUnits(i.units))} ${esc(i.unitLabel)}`;
+    const detail = i.valuationMode === "value" ? "nilai total" : `${esc(fmtUnits(i.units))} ${esc(i.unitLabel)}`;
+    return `• ${esc(i.symbol ?? i.name)}: ${esc(formatRupiah(i.marketValue))} (${sign}${esc(formatRupiah(Math.abs(i.unrealized)))}) · ${detail}`;
   });
   const u = p.totals.unrealized;
   return ctx.reply(

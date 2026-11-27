@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addMonthsJakarta, jakartaDayDiff, toDateInput } from "@/lib/dates";
-import { computeHolding, tradeTotal, valuate, type InvestmentTrade } from "@/lib/investments";
+import { computeHolding, computeValueHolding, tradeTotal, valuate, type InvestmentTrade } from "@/lib/investments";
 import { buildInstallmentSchedule } from "@/server/services/debts";
 
 const d = (s: string) => new Date(`${s}T10:00:00+07:00`);
@@ -83,5 +83,29 @@ describe("jadwal cicilan", () => {
   it("selisih hari kalender WIB", () => {
     expect(jakartaDayDiff(new Date("2026-03-01T16:30:00Z"), new Date("2026-03-02T16:30:00Z"))).toBe(1);
     expect(jakartaDayDiff(new Date("2026-03-01T17:30:00Z"), new Date("2026-03-01T16:00:00Z"))).toBe(-1);
+  });
+});
+
+describe("computeValueHolding", () => {
+  const d = (n: number) => new Date(2026, 0, n);
+  const t = (kind: "buy" | "sell", day: number, totalAmount: number) => ({ kind, occurredAt: d(day), units: totalAmount, pricePerUnit: 1, fee: 0, totalAmount });
+
+  it("tanpa catatan nilai = total setoran bersih", () => {
+    const h = computeValueHolding([t("buy", 1, 1_000_000), t("buy", 2, 500_000)], []);
+    expect(h).toMatchObject({ marketValue: 1_500_000, costBasis: 1_500_000, realized: 0, lastValueAt: null });
+  });
+
+  it("transaksi dan catatan nilai di waktu yang sama: transaksi dulu", () => {
+    const h = computeValueHolding([t("buy", 5, 1_000_000)], [{ asOf: d(5), value: 1_000_000 }]);
+    expect(h.marketValue).toBe(1_000_000);
+  });
+
+  it("rugi lalu tarik semua: rugi terealisasi", () => {
+    const h = computeValueHolding([t("buy", 1, 1_000_000), t("sell", 10, 900_000)], [{ asOf: d(5), value: 900_000 }]);
+    expect(h).toMatchObject({ marketValue: 0, costBasis: 0, realized: -100_000 });
+  });
+
+  it("penarikan melebihi nilai melempar error", () => {
+    expect(() => computeValueHolding([t("buy", 1, 100), t("sell", 2, 101)], [])).toThrow(/melebihi/);
   });
 });

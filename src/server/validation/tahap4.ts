@@ -118,6 +118,8 @@ export const assetInputSchema = z.object({
   symbol: optionalString(20).transform((v) => (v ? v.toUpperCase() : null)),
   unitLabel: optionalString(20).transform((v) => v ?? "unit"),
   unitsPerLot: optionalInt(1, 100000),
+  /** units = unit × harga; value = setor/tarik nominal + nilai total sesekali (robo-advisor). */
+  valuationMode: z.enum(["units", "value"]).optional().default("units"),
 });
 export type AssetInput = z.input<typeof assetInputSchema>;
 

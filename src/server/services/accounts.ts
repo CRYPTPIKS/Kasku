@@ -192,3 +192,48 @@ export async function setAccountArchived(ctx: ServiceContext, id: string, archiv
     return account;
   });
 }
+
+export interface AccountUsage {
+  /** Transaksi aktif yang memakai rekening ini (termasuk transfer, hutang, investasi). */
+  transactions: number;
+  debts: number;
+  investments: number;
+  /** Transaksi di tempat sampah (sudah dihapus lunak) yang ikut terhapus permanen. */
+  trashed: number;
+}
+
+/** Seberapa banyak data yang bergantung pada rekening ini. */
+export async function accountUsage(ctx: ServiceContext, id: string): Promise<AccountUsage> {
+  const touches = { householdId: ctx.householdId, OR: [{ fromAccountId: id }, { toAccountId: id }, { entries: { some: { accountId: id } } }] };
+  const [transactions, debtRows, investments, trashed] = await Promise.all([
+    prisma.transaction.count({ where: { ...touches, deletedAt: null } }),
+    prisma.transaction.findMany({ where: { ...touches, deletedAt: null, debtId: { not: null } }, select: { debtId: true }, distinct: ["debtId"] }),
+    prisma.transaction.count({ where: { ...touches, deletedAt: null, investmentTransaction: { isNot: null } } }),
+    prisma.transaction.count({ where: { ...touches, NOT: { deletedAt: null } } }),
+  ]);
+  return { transactions, debts: debtRows.length, investments, trashed };
+}
+
+/**
+ * Hapus permanen rekening yang belum pernah dipakai. Rekening yang masih punya
+ * transaksi ditolak (riwayat & saldo rekening lain bisa rusak) — arsipkan saja.
+ */
+export async function deleteAccount(ctx: ServiceContext, id: string) {
+  if (!canWrite(ctx)) throw new AppError("Anda tidak punya akses mengubah data.", "forbidden");
+  const before = await prisma.account.findFirst({ where: { id, householdId: ctx.householdId } });
+  if (!before) throw notFound("Rekening");
+  const usage = await accountUsage(ctx, id);
+  if (usage.transactions > 0) {
+    throw new AppError(`Rekening "${before.name}" masih dipakai di ${usage.transactions} transaksi, jadi tidak bisa dihapus. Arsipkan saja.`);
+  }
+  return prisma.$transaction(async (tx) => {
+    // Transaksi di tempat sampah ikut dihapus permanen supaya rekening bisa dilepas.
+    const trashed = await tx.transaction.deleteMany({
+      where: { householdId: ctx.householdId, NOT: { deletedAt: null }, OR: [{ fromAccountId: id }, { toAccountId: id }, { entries: { some: { accountId: id } } }] },
+    });
+    await tx.telegramIdentity.updateMany({ where: { defaultAccountId: id }, data: { defaultAccountId: null } });
+    await tx.account.delete({ where: { id } });
+    await writeAudit(tx, ctx, { entityType: "Account", entityId: id, action: "delete", before: { ...before, purgedTrashedTransactions: trashed.count } });
+    return { purgedTrashed: trashed.count };
+  });
+}

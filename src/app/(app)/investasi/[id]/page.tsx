@@ -28,6 +28,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const accounts = await listAccounts(ctx);
   const writable = canWrite(ctx);
   const valueMode = asset.valuationMode === "value";
+  const cashLinked = asset.transactions.filter((t) => t.transaction).length;
   const nominalMode = valueMode || asset.assetClass === "deposit";
   const labels = valueMode ? { buy: "Setor", sell: "Tarik" } : { buy: "Beli", sell: "Jual" };
   const kindLabel = (k: keyof typeof INVESTMENT_KIND_LABELS) => (k === "buy" || k === "sell" ? labels[k] : INVESTMENT_KIND_LABELS[k]);
@@ -182,7 +183,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             action={deleteAssetAction.bind(null, asset.id)}
             label="Hapus aset"
             title={`Hapus ${asset.name}?`}
-            description="Semua riwayat dan nilai aset ini dihapus. Transaksi kas terkait (mis. pembelian dari BCA) ikut dihapus, jadi saldo rekening kembali seperti sebelum dicatat."
+            description={
+              asset.transactions.length || asset.prices.length
+                ? `⚠️ Aset ini punya ${asset.transactions.length} riwayat ${valueMode ? "setor/tarik" : "beli/jual"}${asset.prices.length ? " dan catatan nilai" : ""}. Semuanya ikut terhapus.${cashLinked ? ` ${cashLinked} transaksi kas terkait (mis. ${valueMode ? "setoran" : "pembelian"} dari BCA) juga dihapus, jadi saldo rekening kembali seperti sebelum dicatat.` : ""}\n\nKalau cuma mau menyembunyikan, pakai "Arsipkan aset".`
+                : "Aset ini belum punya riwayat, jadi akan dihapus permanen."
+            }
             confirmLabel="Hapus aset"
             redirectTo="/investasi"
           />

@@ -66,3 +66,37 @@ export async function setCategoryArchived(ctx: ServiceContext, id: string, archi
     return category;
   });
 }
+
+export interface CategoryUsage {
+  transactions: number;
+  children: number;
+  budgets: number;
+}
+
+export async function categoryUsage(ctx: ServiceContext, id: string): Promise<CategoryUsage> {
+  const [transactions, children, budgets] = await Promise.all([
+    prisma.transaction.count({
+      where: { householdId: ctx.householdId, deletedAt: null, OR: [{ categoryId: id }, { splits: { some: { categoryId: id } } }] },
+    }),
+    prisma.category.count({ where: { householdId: ctx.householdId, parentId: id } }),
+    prisma.budget.count({ where: { householdId: ctx.householdId, categoryId: id } }),
+  ]);
+  return { transactions, children, budgets };
+}
+
+/** Hapus permanen kategori yang belum dipakai transaksi dan tidak punya subkategori. */
+export async function deleteCategory(ctx: ServiceContext, id: string) {
+  if (!canWrite(ctx)) throw new AppError("Anda tidak punya akses mengubah data.", "forbidden");
+  const before = await prisma.category.findFirst({ where: { id, householdId: ctx.householdId } });
+  if (!before) throw notFound("Kategori");
+  const usage = await categoryUsage(ctx, id);
+  if (usage.transactions > 0) {
+    throw new AppError(`Kategori "${before.name}" masih dipakai di ${usage.transactions} transaksi, jadi tidak bisa dihapus. Arsipkan saja.`);
+  }
+  if (usage.children > 0) throw new AppError(`Kategori "${before.name}" masih punya ${usage.children} subkategori. Hapus atau pindahkan dulu.`);
+  return prisma.$transaction(async (tx) => {
+    // Anggaran & aturan merchant ikut terhapus (cascade); transaksi di tempat sampah jadi tanpa kategori.
+    await tx.category.delete({ where: { id } });
+    await writeAudit(tx, ctx, { entityType: "Category", entityId: id, action: "delete", before: { ...before, budgets: usage.budgets } });
+  });
+}
